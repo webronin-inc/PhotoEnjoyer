@@ -53,18 +53,31 @@ jobs:
       - name: Update manifest.json
         run: |
           python -c "
-          import json, os
+          import json, os, re
           from pathlib import Path
           tag = os.environ['GITHUB_REF_NAME']
           ver = tag.lstrip('v')
           repo = os.environ['GITHUB_REPOSITORY']
-          name = 'PhotoEnjoyer'
-          url = f'https://github.com/{repo}/releases/download/{tag}/{name}-Setup-{ver}.exe'
-          m = json.loads(Path('manifest.json').read_text(encoding='utf-8'))
-          m['version'] = ver
-          m['download_url'] = url
-          m['release_date'] = __import__('datetime').date.today().isoformat()
-          Path('manifest.json').write_text(json.dumps(m, ensure_ascii=False, indent=2), encoding='utf-8')
+          url = f'https://github.com/{repo}/releases/download/{tag}/PhotoEnjoyer-Setup-{ver}.exe'
+
+          # notes из CHANGELOG.md
+          notes = 'Обновление'
+          try:
+              text = Path('CHANGELOG.md').read_text(encoding='utf-8')
+              m = re.search(rf'^##\s*{re.escape(ver)}\s*\n(.*?)(?=\n##\s|\Z)',
+                            text, re.DOTALL | re.MULTILINE)
+              if m:
+                  notes = m.group(1).strip()
+          except FileNotFoundError:
+              pass
+
+          data = json.loads(Path('manifest.json').read_text(encoding='utf-8'))
+          data['version'] = ver
+          data['download_url'] = url
+          data['release_date'] = __import__('datetime').date.today().isoformat()
+          data['notes'] = notes
+          Path('manifest.json').write_text(
+              json.dumps(data, ensure_ascii=False, indent=2), encoding='utf-8')
           "
 
       - name: Sign manifest
