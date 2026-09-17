@@ -15,17 +15,25 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 # ---- tkinterdnd2 ----
 dnd_datas, dnd_bins, dnd_hidden = collect_all("tkinterdnd2")
 
+# ---- публичный ключ Ed25519 ----
+key_path = HERE / "photogrid" / "public_key.pem"
+extra_datas = []
+if key_path.exists():
+    extra_datas.append((str(key_path), "photogrid"))
+    print(f"[spec] ✓ public_key.pem вшит: {key_path}")
+else:
+    print(f"[spec] ❌ public_key.pem НЕ найден: {key_path}")
+    print(f"[spec]    подпись обновлений работать НЕ будет")
+
 # ---- весь пакет photogrid целиком ----
 photogrid_submodules = collect_submodules("photogrid")
 print(f"[spec] photogrid submodules: {len(photogrid_submodules)}")
-for m in photogrid_submodules:
-    print(f"   • {m}")
 
 a = Analysis(
     ["sikisiki.py"],
     pathex=[str(HERE)],
     binaries=dnd_bins,
-    datas=dnd_datas,
+    datas=dnd_datas + extra_datas,               # ← добавили ключ
     hiddenimports=dnd_hidden + photogrid_submodules,
     hookspath=[],
     hooksconfig={},
