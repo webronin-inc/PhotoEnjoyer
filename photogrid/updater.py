@@ -309,12 +309,17 @@ def is_installed_via_inno() -> bool:
 # =====================================================================
 #  УСТАНОВКА ОБНОВЛЕНИЯ (установщик в тихом режиме)
 # =====================================================================
-def run_installer_and_exit(installer_path, app):
-    """Запускает скачанный Setup.exe и ждёт, пока ОН сам закроет нашу программу.
+def run_installer_and_exit(installer_path, app, delay_ms: int = 8000):
+    """Запускает скачанный Setup.exe и закрывает программу через паузу.
 
-    Ключевой момент: мы НЕ вызываем app.on_close() активно. Установщик Inno
-    сам найдёт нас по AppMutex и попросит закрыться (или убьёт, если не
-    отвечаем). Так новый EXE не гибнет вместе с нашим процессом.
+    Установщик запускается через cmd /c start — это самый надёжный
+    способ полностью отвязать его от нашего процесса на Windows,
+    чтобы он не погиб вместе с программой.
+
+    Программа закрывается через `delay_ms` миллисекунд — этого
+    достаточно, чтобы установщик стартовал, скопировал файлы и запустил
+    новый EXE. Inno Setup сам прибьёт наш процесс через
+    /FORCECLOSEAPPLICATIONS, если мы к тому времени ещё живы.
     """
     import subprocess
     from pathlib import Path
@@ -330,6 +335,7 @@ def run_installer_and_exit(installer_path, app):
     except Exception:
         work_dir = Path(tempfile.gettempdir())
 
+    # Копия установщика в путь без кириллицы
     local_setup = work_dir / Path(installer_path).name
     try:
         shutil.copy2(installer_path, local_setup)
@@ -337,6 +343,7 @@ def run_installer_and_exit(installer_path, app):
         local_setup = Path(installer_path)
 
     launch_log = work_dir / "launch.log"
+    install_log = work_dir / "install.log"
 
     def log(msg):
         try:
@@ -349,32 +356,38 @@ def run_installer_and_exit(installer_path, app):
     log(f"Текущий EXE: {cur}")
     log(f"Установщик:  {local_setup}")
 
-    args = [
-        str(local_setup),
-        "/SILENT",
-        "/SUPPRESSMSGBOXES",
-        "/NORESTART",
-        "/CLOSEAPPLICATIONS",
-        "/FORCECLOSEAPPLICATIONS",
-    ]
-    log(f"Аргументы: {args}")
-
     if os.name == "nt":
+        # cmd /c start — установщик полностью отвязывается от нашего процесса
+        setup_str = str(local_setup)
+        cmd = (
+            f'start "" "{setup_str}" '
+            f'/SILENT /SUPPRESSMSGBOXES /NORESTART '
+            f'/CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS '
+            f'/LOG="{install_log}"'
+        )
+        log(f"cmd: {cmd}")
+
         DETACHED_PROCESS = 0x00000008
         CREATE_NEW_PROCESS_GROUP = 0x00000200
-        CREATE_BREAKAWAY_FROM_JOB = 0x01000000
-
-        flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
         try:
-            proc = subprocess.Popen(args, creationflags=flags, close_fds=True)
-            log(f"Установщик запущен, PID={proc.pid} (BREAKAWAY)")
-        except OSError as e:
-            log(f"BREAKAWAY не сработал ({e}), пробуем без него")
-            flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-            proc = subprocess.Popen(args, creationflags=flags, close_fds=True)
-            log(f"Установщик запущен, PID={proc.pid}")
+            subprocess.Popen(
+                ["cmd", "/c", cmd],
+                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                close_fds=True,
+            )
+            log("cmd запущен")
+        except Exception as e:
+            log(f"Ошибка запуска cmd: {e}")
+            raise
     else:
-        subprocess.Popen(args, start_new_session=True)
+        subprocess.Popen(
+            [str(local_setup), "/SILENT"],
+            start_new_session=True,
+        )
+
+    # Установщик уже стартовал. Через delay_ms закрываем программу.
+    # К этому моменту Inno уже скопировал файлы и запустил новый EXE.
+    app.root.after(delay_ms, app.on_close)
 
     # ВАЖНО: НЕ вызываем app.on_close() сами.
     # Установщик сам закроет нас по AppMutex через /FORCECLOSEAPPLICATIONS.
