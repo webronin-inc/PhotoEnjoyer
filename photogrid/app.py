@@ -11,8 +11,17 @@ from . import branding
 from .core import build_collage
 from .theme import apply_theme, DARK, LIGHT
 from .ui_widgets import HoverButton, ModernMenuButton, style_dropdown, Slot
+import sys
 
-
+# Страховка: если приложение запущено с console=True и cp1251 —
+# переключаем stdout/stderr на UTF-8.
+for _s in (sys.stdout, sys.stderr):
+    if _s is not None and hasattr(_s, "reconfigure"):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+            
 class App:
     """Главное окно приложения. Плагины получают этот объект в register(app)."""
 
@@ -702,7 +711,6 @@ class App:
         """Создать новое верхнее меню. Возвращает tk.Menu."""
         menu = self._make_menu()
         self.menus[name] = menu
-        # вставляем кнопку перед правой группой (перед "Справка")
         header = self.menu_buttons[0].master if self.menu_buttons else self.root
         btn = ModernMenuButton(header, name, self.palette, menu=menu)
         if self.menu_buttons:

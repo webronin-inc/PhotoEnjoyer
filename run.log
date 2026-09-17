@@ -1,0 +1,30 @@
+Traceback (most recent call last):
+  File "C:\Users\╩шЁшыы\Documents\GitHub\PhotoEnjoyer\photogrid\plugins\loader.py", line 64, in _register
+    print(f"\u2713 яырушэ: {name}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\╩шЁшыы\AppData\Local\Programs\Python\Python313\Lib\encodings\cp1251.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2713' in position 0: character maps to <undefined>
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\╩шЁшыы\Documents\GitHub\PhotoEnjoyer\sikisiki.py", line 5, in <module>
+    run()
+    ~~~^^
+  File "C:\Users\╩шЁшыы\Documents\GitHub\PhotoEnjoyer\photogrid\app.py", line 755, in run
+    app = App(root)
+  File "C:\Users\╩шЁшыы\Documents\GitHub\PhotoEnjoyer\photogrid\app.py", line 61, in __init__
+    loader.load_all(self)
+    ~~~~~~~~~~~~~~~^^^^^^
+  File "C:\Users\╩шЁшыы\Documents\GitHub\PhotoEnjoyer\photogrid\plugins\loader.py", line 53, in load_all
+    if _register(module, name, app):
+       ~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\╩шЁшыы\Documents\GitHub\PhotoEnjoyer\photogrid\plugins\loader.py", line 67, in _register
+    print(f"\u2717 ю°шсър т яырушэх {name}: {e}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\╩шЁшыы\AppData\Local\Programs\Python\Python313\Lib\encodings\cp1251.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\u2717' in position 0: character maps to <undefined>

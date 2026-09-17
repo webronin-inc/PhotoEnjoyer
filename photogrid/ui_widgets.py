@@ -36,10 +36,12 @@ class HoverButton(tk.Button):
             self.config(fg=self._normal_fg)
 
 
-class ModernMenuButton(tk.Menubutton):
-    """Кнопка верхнего меню — плоская, с подсветкой при hover."""
+class ModernMenuButton(tk.Button):
+    """Кнопка верхнего меню — обычный Button, который сам открывает
+    выпадающее меню по клику. В отличие от tk.Menubutton, работает
+    на всех сборках Windows."""
 
-    def __init__(self, master, text, palette, **kwargs):
+    def __init__(self, master, text, palette, menu, **kwargs):
         super().__init__(
             master, text=text,
             bg=palette["surface"], fg=palette["text_dim"],
@@ -48,13 +50,25 @@ class ModernMenuButton(tk.Menubutton):
             bd=0, relief="flat", highlightthickness=0,
             padx=14, pady=6, cursor="hand2",
             font=("Segoe UI", 10),
+            command=self._open_menu,
             **kwargs,
         )
         self._palette = palette
-        self.bind("<Enter>", lambda e: self.config(bg=palette["surface_alt"],
-                                                   fg=palette["text"]))
-        self.bind("<Leave>", lambda e: self.config(bg=palette["surface"],
-                                                   fg=palette["text_dim"]))
+        self._menu = menu
+
+        self.bind("<Enter>", lambda e: self.config(
+            bg=palette["surface_alt"], fg=palette["text"]))
+        self.bind("<Leave>", lambda e: self.config(
+            bg=palette["surface"], fg=palette["text_dim"]))
+
+    def _open_menu(self):
+        """Открывает меню под кнопкой."""
+        try:
+            x = self.winfo_rootx()
+            y = self.winfo_rooty() + self.winfo_height()
+            self._menu.tk_popup(x, y)
+        finally:
+            self._menu.grab_release()
 
 
 def style_dropdown(menu: tk.Menu, palette):

@@ -47,7 +47,7 @@ def load_all(app):
         try:
             module = importlib.import_module(f".{name}", package=__package__)
         except Exception as e:
-            print(f"✗ не удалось импортировать встроенный {name}: {e}")
+            _safe_print(f"✗ не удалось импортировать встроенный {name}: {e}")
             traceback.print_exc()
             continue
         if _register(module, name, app):
@@ -56,16 +56,31 @@ def load_all(app):
     return loaded
 
 
+def _safe_print(*args, **kwargs):
+    """print, который никогда не падает из-за кодировки консоли."""
+    try:
+        print(*args, **kwargs)
+    except Exception:
+        try:
+            text = " ".join(str(a) for a in args)
+            sys.stderr.buffer.write((text + "\n").encode("utf-8", "replace"))
+        except Exception:
+            pass
+
+
 def _register(module, name, app) -> bool:
     if not hasattr(module, "register"):
         return False
     try:
         module.register(app)
-        print(f"✓ плагин: {name}")
+        _safe_print(f"✓ плагин: {name}")
         return True
     except Exception as e:
-        print(f"✗ ошибка в плагине {name}: {e}")
-        traceback.print_exc()
+        _safe_print(f"✗ ошибка в плагине {name}: {e}")
+        try:
+            traceback.print_exc()
+        except Exception:
+            pass
         return False
 
 
@@ -113,5 +128,5 @@ def _iter_external():
                 spec.loader.exec_module(mod)
                 yield name, mod
             except Exception as e:
-                print(f"✗ внешний плагин {name} не загрузился: {e}")
+                _safe_print(f"✗ внешний плагин {name} не загрузился: {e}")
                 traceback.print_exc()
