@@ -306,10 +306,10 @@ def run_installer_and_exit(installer_path, app):
     """Запускает скачанный Setup.exe в тихом режиме, закрывает приложение,
     затем снова его открывает.
 
-    Работает через .bat, чтобы развязаться с текущим процессом.
+    На Windows используется PowerShell-скрипт, потому что cmd.exe не умеет
+    работать с кириллицей в путях (bat-файлы ломаются в cp866/cp1251).
     """
     import subprocess
-    import tempfile
     from pathlib import Path
 
     cur = current_exe()
@@ -317,41 +317,48 @@ def run_installer_and_exit(installer_path, app):
         raise RuntimeError("не удалось определить путь к EXE")
 
     if os.name == "nt":
-        # Используем короткие имена (8.3), чтобы избежать проблем
-        # с кириллицей в пути у cmd.exe.
-        def _short(p: Path) -> str:
-            try:
-                import ctypes
-                buf = ctypes.create_unicode_buffer(260)
-                ctypes.windll.kernel32.GetShortPathNameW(str(p), buf, 260)
-                return buf.value or str(p)
-            except Exception:
-                return str(p)
+        # Каталог без кириллицы — C:\ProgramData\PhotoEnjoyer\
+        work_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / branding.APP_SLUG
+        try:
+            work_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            work_dir = Path(tempfile.gettempdir())
 
-        cur_s = _short(cur)
-        inst_s = _short(Path(installer_path))
+        # Копируем установщик туда же (на случай, если исходный путь с кириллицей)
+        local_setup = work_dir / Path(installer_path).name
+        try:
+            shutil.copy2(installer_path, local_setup)
+        except Exception:
+            local_setup = Path(installer_path)
 
-        bat = Path(tempfile.gettempdir()) / f"{branding.APP_SLUG}_update.bat"
+        ps1 = work_dir / f"{branding.APP_SLUG}_update.ps1"
+
+        # Экранирование одинарных кавычек в путях для PowerShell
+        setup_q = str(local_setup).replace("'", "''")
+        cur_q = str(cur).replace("'", "''")
+
         script = (
-            "@echo off\n"
-            "chcp 65001 >nul\n"
-            "timeout /t 2 /nobreak >nul\n"
-            f'start /wait "" "{inst_s}" '
-            "/SILENT /SUPPRESSMSGBOXES /NORESTART /FORCECLOSEAPPLICATIONS\n"
-            "timeout /t 1 /nobreak >nul\n"
-            f'start "" "{cur_s}"\n'
-            'del "%~f0"\n'
+            "$ErrorActionPreference = 'SilentlyContinue'\n"
+            "Start-Sleep -Seconds 2\n"
+            f"$proc = Start-Process -FilePath '{setup_q}' "
+            "-ArgumentList '/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/FORCECLOSEAPPLICATIONS' "
+            "-Wait -PassThru\n"
+            "Start-Sleep -Seconds 1\n"
+            f"Start-Process -FilePath '{cur_q}'\n"
+            "Remove-Item -LiteralPath $PSCommandPath -Force\n"
         )
-        # bat в OEM-кодировке — cmd.exe понимает её всегда.
-        bat.write_text(script, encoding="cp866", errors="replace")
+        # utf-8-sig (с BOM), чтобы PowerShell корректно прочитал кириллицу
+        ps1.write_text(script, encoding="utf-8-sig")
+
         subprocess.Popen(
-            ["cmd", "/c", str(bat)],
+            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
+             "-File", str(ps1)],
             creationflags=subprocess.DETACHED_PROCESS |
                           subprocess.CREATE_NEW_PROCESS_GROUP,
             close_fds=True,
         )
     else:
-        # Linux/macOS: просто запускаем и закрываемся
+        # Linux/macOS
         subprocess.Popen([str(installer_path)], start_new_session=True)
 
     app.root.after(300, app.on_close)
