@@ -355,7 +355,7 @@ def run_installer_and_exit(installer_path, app, delay_ms: int = 5000):
         # Аргументы для установщика (одной строкой, через пробел)
         args = (
             "/SILENT /SUPPRESSMSGBOXES /NORESTART "
-            "/CLOSEAPPLICATIONS "
+            "/CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS "
             f'/LOG={install_log}'
         )
 
