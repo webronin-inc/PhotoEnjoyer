@@ -3,11 +3,20 @@
 Запуск: python build.py
 Требует: pip install pyinstaller pillow tkinterdnd2 + Inno Setup 6.
 """
+import sys
+
+# UTF-8 для Windows-раннера GitHub Actions
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 import hashlib
 import json
 import shutil
 import subprocess
-import sys
 from datetime import date
 from pathlib import Path
 
