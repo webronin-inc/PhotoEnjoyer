@@ -1,9 +1,9 @@
 {
-  "version": "5.0.1",
+  "version": "5.0.2",
   "release_date": "2026-09-17",
   "homepage": "https://github.com/webronin-inc/PhotoEnjoyer",
-  "download_url": "",
+  "download_url": "https://github.com/webronin-inc/PhotoEnjoyer/releases/download/v5.0.2/PhotoEnjoyer-Setup-5.0.2.exe",
   "sha256": "",
-  "notes": "Первый релиз.",
+  "notes": "Тестовый релиз v5.0.2. Проверка авто-обновления.",
   "plugins": []
 }
