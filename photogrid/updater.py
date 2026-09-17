@@ -317,7 +317,7 @@ def run_installer_and_exit(installer_path, app):
         raise RuntimeError("не удалось определить путь к EXE")
 
     if os.name == "nt":
-        bat = Path(tempfile.gettempdir()) / f"{APP_SLUG}_update.bat"
+        bat = Path(tempfile.gettempdir()) / f"{branding.APP_SLUG}_update.bat"
         bat.write_text(
             "@echo off\n"
             "timeout /t 2 /nobreak >nul\n"
