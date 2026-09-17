@@ -10,13 +10,11 @@ from ..version import __version__
 
 def register(app):
     _ensure_defaults(app)
-    app.add_menu_item("Справка", f"Проверить обновления…",
+    app.add_menu_item("Справка", "Проверить обновления…",
                       lambda: _check(app))
-    app.add_menu_item("Справка", f"Настройки обновлений…",
+    app.add_menu_item("Справка", "Настройки обновлений…",
                       lambda: _settings(app))
-    app.plugin_flags["updater"] = True
-
-
+    app.plugin_flags["updater_ui"] = True
 
 
 def _ensure_defaults(app):
@@ -28,6 +26,7 @@ def _ensure_defaults(app):
 
 # ---------- Проверка ----------
 def _check(app, silent=False):
+    """Запускает проверку обновлений через updater.perform_check."""
     def done(info, err):
         if err == "url_not_configured":
             if not silent:
@@ -44,18 +43,6 @@ def _check(app, silent=False):
         _show_result(app, info, silent)
 
     updater.perform_check(app, silent=silent, on_done=done)
-
-    def worker():
-        try:
-            manifest = updater.fetch_manifest(url)
-            info = updater.analyze(manifest)
-            info["_checked_url"] = url
-            app.root.after(0, lambda: _show_result(app, info, silent))
-        except Exception as e:
-            msg = f"Не удалось проверить обновления:\n{e}"
-            app.root.after(0, lambda: _show_error(app, msg, silent))
-
-    threading.Thread(target=worker, daemon=True).start()
 
 
 def _show_error(app, msg, silent):
@@ -79,6 +66,7 @@ def _show_result(app, info, silent):
     if not silent:
         _UpdateDialog(app, info)
 
+
 def open_update_dialog(app):
     """Публичная точка входа — для бейджика из auto_updater."""
     info = updater.get_pending()
@@ -86,6 +74,7 @@ def open_update_dialog(app):
         _UpdateDialog(app, info)
     else:
         _check(app, silent=False)
+
 
 # ---------- Диалог обновления ----------
 class _UpdateDialog:
@@ -146,7 +135,6 @@ class _UpdateDialog:
                        command=lambda: _open_url(homepage)
                        ).pack(side=tk.LEFT)
 
-        # если запущено из .py — установка exe невозможна, но плагины обновить можно
         if not updater.is_frozen():
             self.status.config(
                 text="Запущено из исходников: установка EXE недоступна, "
@@ -182,8 +170,6 @@ class _UpdateDialog:
                 tmp_dir = Path(tempfile.gettempdir())
 
                 if updater.is_installed_via_inno():
-                    # Стандартный случай: пользователь ставил через Setup.exe.
-                    # Скачиваем новый Setup и запускаем в тихом режиме.
                     setup_name = f"{branding.APP_NAME}-Setup-{info['remote']}.exe"
                     tmp_setup = tmp_dir / setup_name
                     updater.download_file(info["download_url"], tmp_setup,
@@ -196,7 +182,6 @@ class _UpdateDialog:
                     updater.run_installer_and_exit(tmp_setup, self.app)
                     return
 
-                # Portable-режим: подменяем сам EXE
                 tmp_exe = tmp_dir / f"{branding.APP_SLUG}_new.exe"
                 updater.download_file(info["download_url"], tmp_exe,
                                       progress_cb=self._progress_cb)
