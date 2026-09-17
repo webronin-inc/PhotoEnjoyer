@@ -309,58 +309,77 @@ def is_installed_via_inno() -> bool:
 # =====================================================================
 #  УСТАНОВКА ОБНОВЛЕНИЯ (установщик в тихом режиме)
 # =====================================================================
-def run_installer_and_exit(installer_path, app, delay_ms: int = 3000):
-    """Запускает скачанный Setup.exe в тихом режиме.
+def run_installer_and_exit(installer_path, app):
+    """Запускает скачанный Setup.exe и ждёт, пока ОН сам закроет нашу программу.
 
-    Никаких .ps1/.bat — установщик Inno сам:
-      1. Дождётся закрытия нашего процесса (через AppMutex).
-      2. Установит новую версию.
-      3. Запустит свежий EXE (благодаря [Run] в installer.iss).
-
-    Мы только запускаем установщик и через `delay_ms` закрываемся.
+    Ключевой момент: мы НЕ вызываем app.on_close() активно. Установщик Inno
+    сам найдёт нас по AppMutex и попросит закрыться (или убьёт, если не
+    отвечаем). Так новый EXE не гибнет вместе с нашим процессом.
     """
     import subprocess
     from pathlib import Path
+    from datetime import datetime
 
     cur = current_exe()
     if cur is None:
         raise RuntimeError("не удалось определить путь к EXE")
 
-    # Копируем установщик в путь без кириллицы (страховка от старых проблем)
-    if os.name == "nt":
-        work_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / branding.APP_SLUG
-        try:
-            work_dir.mkdir(parents=True, exist_ok=True)
-            local_setup = work_dir / Path(installer_path).name
-            shutil.copy2(installer_path, local_setup)
-        except Exception:
-            local_setup = Path(installer_path)
-    else:
+    work_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / branding.APP_SLUG
+    try:
+        work_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        work_dir = Path(tempfile.gettempdir())
+
+    local_setup = work_dir / Path(installer_path).name
+    try:
+        shutil.copy2(installer_path, local_setup)
+    except Exception:
         local_setup = Path(installer_path)
+
+    launch_log = work_dir / "launch.log"
+
+    def log(msg):
+        try:
+            with open(launch_log, "a", encoding="utf-8") as f:
+                f.write(f"[{datetime.now():%Y-%m-%d %H:%M:%S}] {msg}\n")
+        except Exception:
+            pass
+
+    log("=== Запуск обновления ===")
+    log(f"Текущий EXE: {cur}")
+    log(f"Установщик:  {local_setup}")
 
     args = [
         str(local_setup),
         "/SILENT",
         "/SUPPRESSMSGBOXES",
         "/NORESTART",
-        "/FORCECLOSEAPPLICATIONS",
         "/CLOSEAPPLICATIONS",
+        "/FORCECLOSEAPPLICATIONS",
     ]
+    log(f"Аргументы: {args}")
 
     if os.name == "nt":
         DETACHED_PROCESS = 0x00000008
         CREATE_NEW_PROCESS_GROUP = 0x00000200
-        subprocess.Popen(
-            args,
-            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
-            close_fds=True,
-        )
+        CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+
+        flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
+        try:
+            proc = subprocess.Popen(args, creationflags=flags, close_fds=True)
+            log(f"Установщик запущен, PID={proc.pid} (BREAKAWAY)")
+        except OSError as e:
+            log(f"BREAKAWAY не сработал ({e}), пробуем без него")
+            flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+            proc = subprocess.Popen(args, creationflags=flags, close_fds=True)
+            log(f"Установщик запущен, PID={proc.pid}")
     else:
         subprocess.Popen(args, start_new_session=True)
 
-    # Даём установщику время стартовать и увидеть наш AppMutex.
-    # После этого закрываемся — Inno подхватит и продолжит сам.
-    app.root.after(delay_ms, app.on_close)
+    # ВАЖНО: НЕ вызываем app.on_close() сами.
+    # Установщик сам закроет нас по AppMutex через /FORCECLOSEAPPLICATIONS.
+    # Ждём — наша программа должна просто висеть, пока установщик её не грохнет.
+    log("Ожидаем, что установщик закроет нас по AppMutex")
     
     # ---------- подпись Ed25519 ----------
 def _load_public_key():
