@@ -313,8 +313,9 @@ def run_installer_and_exit(installer_path, app):
     """Запускает скачанный Setup.exe в тихом режиме, закрывает приложение,
     затем снова его открывает.
 
-    На Windows используется PowerShell-скрипт, потому что cmd.exe не умеет
-    работать с кириллицей в путях (bat-файлы ломаются в cp866/cp1251).
+    На Windows используется PowerShell-скрипт с логированием в
+    C:\\ProgramData\\PhotoEnjoyer\\update.log — по нему можно понять,
+    где что пошло не так.
     """
     import subprocess
     from pathlib import Path
@@ -324,14 +325,13 @@ def run_installer_and_exit(installer_path, app):
         raise RuntimeError("не удалось определить путь к EXE")
 
     if os.name == "nt":
-        # Каталог без кириллицы — C:\ProgramData\PhotoEnjoyer\
         work_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / branding.APP_SLUG
         try:
             work_dir.mkdir(parents=True, exist_ok=True)
         except Exception:
             work_dir = Path(tempfile.gettempdir())
 
-        # Копируем установщик туда же (на случай, если исходный путь с кириллицей)
+        # Копия установщика в путь без кириллицы
         local_setup = work_dir / Path(installer_path).name
         try:
             shutil.copy2(installer_path, local_setup)
@@ -339,22 +339,45 @@ def run_installer_and_exit(installer_path, app):
             local_setup = Path(installer_path)
 
         ps1 = work_dir / f"{branding.APP_SLUG}_update.ps1"
+        log = work_dir / "update.log"
 
-        # Экранирование одинарных кавычек в путях для PowerShell
         setup_q = str(local_setup).replace("'", "''")
         cur_q = str(cur).replace("'", "''")
+        cur_dir_q = str(cur.parent).replace("'", "''")
+        log_q = str(log).replace("'", "''")
 
-        script = (
-            "$ErrorActionPreference = 'SilentlyContinue'\n"
-            "Start-Sleep -Seconds 2\n"
-            f"$proc = Start-Process -FilePath '{setup_q}' "
-            "-ArgumentList '/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/FORCECLOSEAPPLICATIONS' "
-            "-Wait -PassThru\n"
-            "Start-Sleep -Seconds 1\n"
-            f"Start-Process -FilePath '{cur_q}'\n"
-            "Remove-Item -LiteralPath $PSCommandPath -Force\n"
-        )
-        # utf-8-sig (с BOM), чтобы PowerShell корректно прочитал кириллицу
+        script = f"""
+$ErrorActionPreference = 'Continue'
+Start-Transcript -Path '{log_q}' -Force -Append | Out-Null
+
+try {{
+    Write-Host "=== Обновление {branding.APP_NAME} ==="
+    Write-Host "Setup:  {setup_q}"
+    Write-Host "Target: {cur_q}"
+
+    Start-Sleep -Seconds 3
+
+    $proc = Start-Process -FilePath '{setup_q}' `
+        -ArgumentList '/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/FORCECLOSEAPPLICATIONS' `
+        -Wait -PassThru
+    Write-Host "Setup exit code: $($proc.ExitCode)"
+
+    Start-Sleep -Seconds 3
+
+    if (Test-Path '{cur_q}') {{
+        Write-Host "Запуск: {cur_q}"
+        Start-Process -FilePath '{cur_q}' -WorkingDirectory '{cur_dir_q}'
+    }} else {{
+        Write-Host "❌ EXE не найден по пути: {cur_q}"
+    }}
+}} catch {{
+    Write-Host "❌ Ошибка: $_"
+}} finally {{
+    Stop-Transcript | Out-Null
+    Start-Sleep -Seconds 1
+    Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+}}
+"""
         ps1.write_text(script, encoding="utf-8-sig")
 
         subprocess.Popen(
@@ -365,7 +388,6 @@ def run_installer_and_exit(installer_path, app):
             close_fds=True,
         )
     else:
-        # Linux/macOS
         subprocess.Popen([str(installer_path)], start_new_session=True)
 
     app.root.after(300, app.on_close)
