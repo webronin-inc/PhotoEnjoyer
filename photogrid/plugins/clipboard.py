@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from ..config import IMAGE_EXTS
+from .. import branding
 
 try:
     from PIL import ImageGrab

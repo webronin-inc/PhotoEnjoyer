@@ -8,3 +8,5 @@ installer/*.log
 .idea/
 *.old
 *.bak
+keys/private_key.pem
+keys/_tmp_private.pem

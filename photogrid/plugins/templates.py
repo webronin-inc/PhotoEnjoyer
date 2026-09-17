@@ -3,6 +3,7 @@ import json
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, simpledialog, ttk
+from .. import branding
 
 TEMPLATES_FILE = Path.home() / f"{branding.APP_CONFIG_DIR}_templates.json"
 

@@ -6,6 +6,7 @@ from tkinter import messagebox, ttk
 from PIL import Image, ImageTk
 
 from ..core import load_rgb
+from .. import branding
 
 _state = {"originals": {}, "crops": {}, "tempdir": None}
 

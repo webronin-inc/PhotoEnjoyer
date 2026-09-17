@@ -59,13 +59,20 @@ def current_exe() -> Path:
 
 
 # ---------- проверка ----------
-def fetch_manifest(url: str, timeout: int = 10) -> dict:
+def fetch_manifest(url: str, timeout: int = 10,
+                   require_signature: bool = True) -> dict:
     req = urllib.request.Request(url, headers={
         "User-Agent": branding.user_agent(),
         "Cache-Control": "no-cache",
     })
     with urllib.request.urlopen(req, timeout=timeout) as r:
         data = json.loads(r.read().decode("utf-8"))
+
+    if require_signature:
+        if not verify_manifest_signature(data):
+            raise ValueError(
+                "Манифест не подписан или подпись неверна — обновление отклонено"
+            )
     return data
 
 
@@ -362,3 +369,64 @@ def run_installer_and_exit(installer_path, app):
         subprocess.Popen([str(installer_path)], start_new_session=True)
 
     app.root.after(300, app.on_close)
+    
+    # ---------- подпись Ed25519 ----------
+def _load_public_key():
+    """Публичный ключ, вшитый в приложение."""
+    from pathlib import Path
+    try:
+        from cryptography.hazmat.primitives import serialization
+    except ImportError:
+        return None
+
+    # Ищем рядом с модулем (при запуске из .py)
+    here = Path(__file__).parent / "public_key.pem"
+    # Или внутри распакованного PyInstaller bundle
+    if not here.exists():
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            here = Path(meipass) / "photogrid" / "public_key.pem"
+    if not here.exists():
+        return None
+
+    pem = here.read_bytes()
+    return serialization.load_pem_public_key(pem)
+
+
+def verify_manifest_signature(manifest: dict) -> bool:
+    """Проверяет Ed25519-подпись манифеста.
+
+    Манифест должен содержать поле 'signature' (base64).
+    Подписывается канонизированный JSON БЕЗ поля signature.
+    Если поле signature отсутствует — возвращаем False (строгий режим).
+    """
+    sig_b64 = manifest.get("signature")
+    if not sig_b64:
+        return False
+
+    try:
+        import base64
+        from cryptography.exceptions import InvalidSignature
+    except ImportError:
+        print("cryptography не установлена — подпись не проверяется")
+        return False
+
+    pub = _load_public_key()
+    if pub is None:
+        print("Публичный ключ не найден — подпись не проверяется")
+        return False
+
+    # Канонизация: копия манифеста без signature, стабильный JSON
+    payload = {k: v for k, v in manifest.items() if k != "signature"}
+    canonical = json.dumps(payload, ensure_ascii=False,
+                           sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+    try:
+        pub.verify(base64.b64decode(sig_b64), canonical)
+        return True
+    except InvalidSignature:
+        print("Подпись манифеста НЕВАЛИДНА")
+        return False
+    except Exception as e:
+        print(f"Ошибка проверки подписи: {e}")
+        return False
