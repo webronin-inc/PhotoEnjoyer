@@ -1,10 +1,10 @@
 {
-  "version": "5.0.32",
+  "version": "5.0.33",
   "release_date": "2026-09-17",
   "homepage": "https://github.com/webronin-inc/PhotoEnjoyer",
-  "download_url": "https://github.com/webronin-inc/PhotoEnjoyer/releases/download/v5.0.32/PhotoEnjoyer-Setup-5.0.32.exe",
+  "download_url": "https://github.com/webronin-inc/PhotoEnjoyer/releases/download/v5.0.33/PhotoEnjoyer-Setup-5.0.33.exe",
   "sha256": "",
   "notes": "- Фикс ошибок.",
   "plugins": [],
-  "signature": "kIBVdOflX9m0korn412oeATRDBz25KFjtWVuAv8bhtJO31rwMO40CwxuwJR5Y5uDGcXqxUelnOoQiRGsEm3WBw=="
+  "signature": "mSNG65vJSAUqWpYn5d09BnOQK8L4hZgMuGXndc428Vccp+neYY+6OsuqgJoL+J+PgT2m0jfRI5MwlQQzE6h+Ag=="
 }
