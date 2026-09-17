@@ -1,10 +1,10 @@
 {
-  "version": "5.0.20",
+  "version": "5.0.21",
   "release_date": "2026-09-17",
   "homepage": "https://github.com/webronin-inc/PhotoEnjoyer",
-  "download_url": "https://github.com/webronin-inc/PhotoEnjoyer/releases/download/v5.0.20/PhotoEnjoyer-Setup-5.0.20.exe",
+  "download_url": "https://github.com/webronin-inc/PhotoEnjoyer/releases/download/v5.0.21/PhotoEnjoyer-Setup-5.0.21.exe",
   "sha256": "",
   "notes": "- Обновление системного меню.\n- Исправление ошибки обновления клиента.\n- Исправление функционала обновления.",
   "plugins": [],
-  "signature": "UWvES1he/iaJBHK0i/yUE93RqN0+75cLlowCLSR9bvy1nqcy6UrfiUFwL63IjVw1Ef9GnKBCshT9OP4lRedTDA=="
+  "signature": "LZZDDtOt0kmPZxgzdjMVvyxHk25kIw8kOax9rrO8IDCiklg1Bcm/tup9AaH0r6lF7Imdkyp6yqcyvsZ7gclsCw=="
 }
