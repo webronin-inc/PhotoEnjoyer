@@ -41,7 +41,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#AppExeName}.exe
 SetupIconFile={#AppIcon}
-AppMutex={#AppExeName}SingleInstance
+
 
 ; Лицензия и README — подключаются, только если файлы есть
 #ifdef HasLicense
