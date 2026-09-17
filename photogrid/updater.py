@@ -309,15 +309,14 @@ def is_installed_via_inno() -> bool:
 # =====================================================================
 #  УСТАНОВКА ОБНОВЛЕНИЯ (установщик в тихом режиме)
 # =====================================================================
-def run_installer_and_exit(installer_path, app, delay_ms: int = 8000):
-    """Запускает скачанный Setup.exe и закрывает программу через паузу.
+def run_installer_and_exit(installer_path, app, delay_ms: int = 5000):
+    """Запускает установщик через os.startfile (ShellExecute).
 
-    Установщик запускается напрямую через subprocess.Popen с флагом
-    CREATE_BREAKAWAY_FROM_JOB — это надёжно отвязывает его от нашего
-    процесса на уровне Windows API. Никакого cmd /c — значит никаких
-    проблем с экранированием обратных слешей в путях.
+    Это единственный способ на Windows гарантированно отвязать
+    установщик от нашей программы. ShellExecute запускает процесс
+    через explorer — он становится независимым, как будто пользователь
+    кликнул по ярлыку. Установщик НЕ погибнет вместе с нами.
     """
-    import subprocess
     from pathlib import Path
     from datetime import datetime
 
@@ -352,47 +351,42 @@ def run_installer_and_exit(installer_path, app, delay_ms: int = 8000):
     log(f"Текущий EXE: {cur}")
     log(f"Установщик:  {local_setup}")
 
-    args = [
-        str(local_setup),
-        "/SILENT",
-        "/SUPPRESSMSGBOXES",
-        "/NORESTART",
-        "/CLOSEAPPLICATIONS",
-        "/FORCECLOSEAPPLICATIONS",
-        f"/LOG={install_log}",
-    ]
-    log(f"Аргументы: {args}")
-
     if os.name == "nt":
-        DETACHED_PROCESS = 0x00000008
-        CREATE_NEW_PROCESS_GROUP = 0x00000200
-        CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+        # Аргументы для установщика (одной строкой, через пробел)
+        args = (
+            "/SILENT /SUPPRESSMSGBOXES /NORESTART "
+            "/CLOSEAPPLICATIONS "
+            f'/LOG={install_log}'
+        )
 
-        # Пробуем с BREAKAWAY — отвязка от job-объекта родителя
-        flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
+        log(f"os.startfile: {local_setup}")
+        log(f"args: {args}")
+
         try:
-            proc = subprocess.Popen(args, creationflags=flags, close_fds=True)
-            log(f"✓ Установщик запущен (BREAKAWAY), PID={proc.pid}")
-        except OSError as e:
-            log(f"BREAKAWAY не сработал: {e}. Пробуем без него.")
-            flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-            proc = subprocess.Popen(args, creationflags=flags, close_fds=True)
-            log(f"✓ Установщик запущен, PID={proc.pid}")
+            # ShellExecuteW запускает процесс через explorer —
+            # он НЕ является дочерним и переживёт нашу смерть.
+            os.startfile(str(local_setup), "open", args)
+            log("✓ os.startfile выполнен")
+        except Exception as e:
+            log(f"✗ os.startfile упал: {e}")
+            # Фоллбэк: обычный Popen
+            import subprocess
+            DETACHED_PROCESS = 0x00000008
+            CREATE_NEW_PROCESS_GROUP = 0x00000200
+            subprocess.Popen(
+                [str(local_setup)] + args.split(),
+                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                close_fds=True,
+            )
+            log("Запущен фоллбэк через Popen")
     else:
-        subprocess.Popen(args, start_new_session=True)
+        import subprocess
+        subprocess.Popen([str(local_setup), "/SILENT"], start_new_session=True)
 
     log(f"Программа закроется через {delay_ms} мс")
-    # Установщик уже стартовал и отвязан от нас. Через delay_ms закрываемся.
+    # Даём установщику 5 секунд, чтобы он стартовал и нашёл наш AppMutex.
+    # Inno сам закроет наш процесс, когда будет готов.
     app.root.after(delay_ms, app.on_close)
-
-    # Установщик уже стартовал. Через delay_ms закрываем программу.
-    # К этому моменту Inno уже скопировал файлы и запустил новый EXE.
-    app.root.after(delay_ms, app.on_close)
-
-    # ВАЖНО: НЕ вызываем app.on_close() сами.
-    # Установщик сам закроет нас по AppMutex через /FORCECLOSEAPPLICATIONS.
-    # Ждём — наша программа должна просто висеть, пока установщик её не грохнет.
-    log("Ожидаем, что установщик закроет нас по AppMutex")
     
     # ---------- подпись Ed25519 ----------
 def _load_public_key():
