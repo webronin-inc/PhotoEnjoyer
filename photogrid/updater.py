@@ -317,17 +317,33 @@ def run_installer_and_exit(installer_path, app):
         raise RuntimeError("не удалось определить путь к EXE")
 
     if os.name == "nt":
+        # Используем короткие имена (8.3), чтобы избежать проблем
+        # с кириллицей в пути у cmd.exe.
+        def _short(p: Path) -> str:
+            try:
+                import ctypes
+                buf = ctypes.create_unicode_buffer(260)
+                ctypes.windll.kernel32.GetShortPathNameW(str(p), buf, 260)
+                return buf.value or str(p)
+            except Exception:
+                return str(p)
+
+        cur_s = _short(cur)
+        inst_s = _short(Path(installer_path))
+
         bat = Path(tempfile.gettempdir()) / f"{branding.APP_SLUG}_update.bat"
-        bat.write_text(
+        script = (
             "@echo off\n"
+            "chcp 65001 >nul\n"
             "timeout /t 2 /nobreak >nul\n"
-            f'start /wait "" "{installer_path}" '
+            f'start /wait "" "{inst_s}" '
             "/SILENT /SUPPRESSMSGBOXES /NORESTART /FORCECLOSEAPPLICATIONS\n"
             "timeout /t 1 /nobreak >nul\n"
-            f'start "" "{cur}"\n'
-            'del "%~f0"\n',
-            encoding="utf-8",
+            f'start "" "{cur_s}"\n'
+            'del "%~f0"\n'
         )
+        # bat в OEM-кодировке — cmd.exe понимает её всегда.
+        bat.write_text(script, encoding="cp866", errors="replace")
         subprocess.Popen(
             ["cmd", "/c", str(bat)],
             creationflags=subprocess.DETACHED_PROCESS |
