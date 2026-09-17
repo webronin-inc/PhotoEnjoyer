@@ -203,13 +203,15 @@ class _UpdateDialog:
         p = self.app.palette
         box = tk.Frame(parent, bg=p["surface_alt"])
         box.pack(side=tk.LEFT)
+
         tk.Label(box, text=label, bg=p["surface_alt"], fg=p["text_dim"],
-                 font=("Segoe UI", 8), padx=10, pady=(6, 0),
-                 anchor="w").pack(fill=tk.X)
+                 font=("Segoe UI", 8),
+                 anchor="w").pack(fill=tk.X, padx=10, pady=(6, 0))
+
         tk.Label(box, text=version, bg=p["surface_alt"],
                  fg=p["text_dim"] if muted else ACCENT,
-                 font=("Segoe UI", 12, "bold"), padx=10, pady=(0, 6),
-                 anchor="w").pack(fill=tk.X)
+                 font=("Segoe UI", 12, "bold"),
+                 anchor="w").pack(fill=tk.X, padx=10, pady=(0, 6))
 
     def _on_close_request(self):
         if self._installing:
