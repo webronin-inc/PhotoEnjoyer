@@ -81,7 +81,7 @@ Name: "{userstartup}\{#AppName}";        Filename: "{app}\{#AppExeName}.exe"; Ta
 
 [Run]
 Filename: "{app}\{#AppExeName}.exe"; Description: "Запустить {#AppName}"; \
-          Flags: nowait postinstall skipifsilent
+          Flags: nowait postinstall
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\plugins"

@@ -309,13 +309,15 @@ def is_installed_via_inno() -> bool:
 # =====================================================================
 #  УСТАНОВКА ОБНОВЛЕНИЯ (установщик в тихом режиме)
 # =====================================================================
-def run_installer_and_exit(installer_path, app):
-    """Запускает скачанный Setup.exe в тихом режиме, закрывает приложение,
-    затем снова его открывает.
+def run_installer_and_exit(installer_path, app, delay_ms: int = 3000):
+    """Запускает скачанный Setup.exe в тихом режиме.
 
-    На Windows используется PowerShell-скрипт с логированием в
-    C:\\ProgramData\\PhotoEnjoyer\\update.log — по нему можно понять,
-    где что пошло не так.
+    Никаких .ps1/.bat — установщик Inno сам:
+      1. Дождётся закрытия нашего процесса (через AppMutex).
+      2. Установит новую версию.
+      3. Запустит свежий EXE (благодаря [Run] в installer.iss).
+
+    Мы только запускаем установщик и через `delay_ms` закрываемся.
     """
     import subprocess
     from pathlib import Path
@@ -324,73 +326,41 @@ def run_installer_and_exit(installer_path, app):
     if cur is None:
         raise RuntimeError("не удалось определить путь к EXE")
 
+    # Копируем установщик в путь без кириллицы (страховка от старых проблем)
     if os.name == "nt":
         work_dir = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / branding.APP_SLUG
         try:
             work_dir.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            work_dir = Path(tempfile.gettempdir())
-
-        # Копия установщика в путь без кириллицы
-        local_setup = work_dir / Path(installer_path).name
-        try:
+            local_setup = work_dir / Path(installer_path).name
             shutil.copy2(installer_path, local_setup)
         except Exception:
             local_setup = Path(installer_path)
+    else:
+        local_setup = Path(installer_path)
 
-        ps1 = work_dir / f"{branding.APP_SLUG}_update.ps1"
-        log = work_dir / "update.log"
+    args = [
+        str(local_setup),
+        "/SILENT",
+        "/SUPPRESSMSGBOXES",
+        "/NORESTART",
+        "/FORCECLOSEAPPLICATIONS",
+        "/CLOSEAPPLICATIONS",
+    ]
 
-        setup_q = str(local_setup).replace("'", "''")
-        cur_q = str(cur).replace("'", "''")
-        cur_dir_q = str(cur.parent).replace("'", "''")
-        log_q = str(log).replace("'", "''")
-
-        script = f"""
-$ErrorActionPreference = 'Continue'
-Start-Transcript -Path '{log_q}' -Force -Append | Out-Null
-
-try {{
-    Write-Host "=== Обновление {branding.APP_NAME} ==="
-    Write-Host "Setup:  {setup_q}"
-    Write-Host "Target: {cur_q}"
-
-    Start-Sleep -Seconds 3
-
-    $proc = Start-Process -FilePath '{setup_q}' `
-        -ArgumentList '/SILENT','/SUPPRESSMSGBOXES','/NORESTART','/FORCECLOSEAPPLICATIONS' `
-        -Wait -PassThru
-    Write-Host "Setup exit code: $($proc.ExitCode)"
-
-    Start-Sleep -Seconds 3
-
-    if (Test-Path '{cur_q}') {{
-        Write-Host "Запуск: {cur_q}"
-        Start-Process -FilePath '{cur_q}' -WorkingDirectory '{cur_dir_q}'
-    }} else {{
-        Write-Host "❌ EXE не найден по пути: {cur_q}"
-    }}
-}} catch {{
-    Write-Host "❌ Ошибка: $_"
-}} finally {{
-    Stop-Transcript | Out-Null
-    Start-Sleep -Seconds 1
-    Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
-}}
-"""
-        ps1.write_text(script, encoding="utf-8-sig")
-
+    if os.name == "nt":
+        DETACHED_PROCESS = 0x00000008
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
         subprocess.Popen(
-            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass",
-             "-File", str(ps1)],
-            creationflags=subprocess.DETACHED_PROCESS |
-                          subprocess.CREATE_NEW_PROCESS_GROUP,
+            args,
+            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
             close_fds=True,
         )
     else:
-        subprocess.Popen([str(installer_path)], start_new_session=True)
+        subprocess.Popen(args, start_new_session=True)
 
-    app.root.after(300, app.on_close)
+    # Даём установщику время стартовать и увидеть наш AppMutex.
+    # После этого закрываемся — Inno подхватит и продолжит сам.
+    app.root.after(delay_ms, app.on_close)
     
     # ---------- подпись Ed25519 ----------
 def _load_public_key():
