@@ -10,6 +10,9 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
     env:
       PYTHONUTF8: "1"
       PYTHONIOENCODING: "utf-8"
