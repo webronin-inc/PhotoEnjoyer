@@ -312,14 +312,10 @@ def is_installed_via_inno() -> bool:
 def run_installer_and_exit(installer_path, app, delay_ms: int = 8000):
     """Запускает скачанный Setup.exe и закрывает программу через паузу.
 
-    Установщик запускается через cmd /c start — это самый надёжный
-    способ полностью отвязать его от нашего процесса на Windows,
-    чтобы он не погиб вместе с программой.
-
-    Программа закрывается через `delay_ms` миллисекунд — этого
-    достаточно, чтобы установщик стартовал, скопировал файлы и запустил
-    новый EXE. Inno Setup сам прибьёт наш процесс через
-    /FORCECLOSEAPPLICATIONS, если мы к тому времени ещё живы.
+    Установщик запускается напрямую через subprocess.Popen с флагом
+    CREATE_BREAKAWAY_FROM_JOB — это надёжно отвязывает его от нашего
+    процесса на уровне Windows API. Никакого cmd /c — значит никаких
+    проблем с экранированием обратных слешей в путях.
     """
     import subprocess
     from pathlib import Path
@@ -356,34 +352,38 @@ def run_installer_and_exit(installer_path, app, delay_ms: int = 8000):
     log(f"Текущий EXE: {cur}")
     log(f"Установщик:  {local_setup}")
 
-    if os.name == "nt":
-        # cmd /c start — установщик полностью отвязывается от нашего процесса
-        setup_str = str(local_setup)
-        cmd = (
-            f'start "" "{setup_str}" '
-            f'/SILENT /SUPPRESSMSGBOXES /NORESTART '
-            f'/CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS '
-            f'/LOG="{install_log}"'
-        )
-        log(f"cmd: {cmd}")
+    args = [
+        str(local_setup),
+        "/SILENT",
+        "/SUPPRESSMSGBOXES",
+        "/NORESTART",
+        "/CLOSEAPPLICATIONS",
+        "/FORCECLOSEAPPLICATIONS",
+        f"/LOG={install_log}",
+    ]
+    log(f"Аргументы: {args}")
 
+    if os.name == "nt":
         DETACHED_PROCESS = 0x00000008
         CREATE_NEW_PROCESS_GROUP = 0x00000200
+        CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+
+        # Пробуем с BREAKAWAY — отвязка от job-объекта родителя
+        flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB
         try:
-            subprocess.Popen(
-                ["cmd", "/c", cmd],
-                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
-                close_fds=True,
-            )
-            log("cmd запущен")
-        except Exception as e:
-            log(f"Ошибка запуска cmd: {e}")
-            raise
+            proc = subprocess.Popen(args, creationflags=flags, close_fds=True)
+            log(f"✓ Установщик запущен (BREAKAWAY), PID={proc.pid}")
+        except OSError as e:
+            log(f"BREAKAWAY не сработал: {e}. Пробуем без него.")
+            flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+            proc = subprocess.Popen(args, creationflags=flags, close_fds=True)
+            log(f"✓ Установщик запущен, PID={proc.pid}")
     else:
-        subprocess.Popen(
-            [str(local_setup), "/SILENT"],
-            start_new_session=True,
-        )
+        subprocess.Popen(args, start_new_session=True)
+
+    log(f"Программа закроется через {delay_ms} мс")
+    # Установщик уже стартовал и отвязан от нас. Через delay_ms закрываемся.
+    app.root.after(delay_ms, app.on_close)
 
     # Установщик уже стартовал. Через delay_ms закрываем программу.
     # К этому моменту Inno уже скопировал файлы и запустил новый EXE.
