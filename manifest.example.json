@@ -1,0 +1,15 @@
+{
+    "version": "5.0.1",
+    "release_date": "2025-02-01",
+    "homepage": "https://github.com/USER/REPO/releases",
+    "download_url": "https://github.com/USER/REPO/releases/download/v5.0.1/PhotoGrid.exe",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "notes": "Что нового в 5.0.1:\n• Плагин подписей под фото\n• Исправление в batch при пустых подпапках\n• Мелкие улучшения UI",
+    "plugins": [
+        {
+            "name": "instagram_square.py",
+            "url": "https://raw.githubusercontent.com/USER/REPO/main/external_plugins/instagram_square.py",
+            "sha256": "..."
+        }
+    ]
+}
