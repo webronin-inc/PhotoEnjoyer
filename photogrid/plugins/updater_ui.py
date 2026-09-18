@@ -19,7 +19,7 @@ TEXT_DIM = "#7e7e9c"
 def register(app):
     _ensure_defaults(app)
     app.add_menu_item("Справка", "Проверить обновления…", lambda: _check(app))
-    app.add_menu_item("Справка", "Настройки обновлений…", lambda: _settings(app))
+    # Пункт «Настройки обновлений…» убран — URL манифеста задаётся только разработчиком
     app.plugin_flags["updater_ui"] = True
 
 

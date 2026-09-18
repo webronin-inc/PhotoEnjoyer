@@ -4,7 +4,7 @@
 #  ★  ГЛАВНАЯ НАСТРОЙКА — НАЗВАНИЕ ПРОГРАММЫ
 # ═══════════════════════════════════════════════════════════════════
 APP_NAME       = "PhotoEnjoyer"          # ← название, которое видит пользователь
-APP_TAGLINE    = "bneo group"
+APP_TAGLINE    = ""
 APP_PUBLISHER  = "EndlessOder inc"        # для "О программе" и метаданных EXE
 APP_HOMEPAGE   = "@disperial"
 APP_EMAIL      = "@disperial"

@@ -30,7 +30,13 @@ def center_crop_resize(img, w, h):
 
 
 def build_collage(photos, config, for_preview=False):
+    """Собирает коллаж из N фото по раскладке.
+
+    photos — список путей (или None). Количество ячеек определяется раскладкой.
+    """
     cols, rows = LAYOUTS[config["layout"]]
+    total_cells = cols * rows
+
     real_cell = max(50, int(config["cell_size"]))
     real_border = max(0, int(config["border"]))
 
@@ -49,7 +55,10 @@ def build_collage(photos, config, for_preview=False):
     total_h = rows * cell + (rows + 1) * border
     canvas = Image.new("RGB", (total_w, total_h), border_color)
 
-    for i, path in enumerate(photos):
+    # photos может быть короче total_cells
+    for i in range(total_cells):
+        path = photos[i] if i < len(photos) else None
+
         col = i % cols
         row = i // cols
         x0 = border + col * (cell + border)

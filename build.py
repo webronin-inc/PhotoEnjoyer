@@ -40,7 +40,8 @@ def check_dependencies():
     missing = []
     for mod, pip in (("PyInstaller", "pyinstaller"),
                      ("PIL", "pillow"),
-                     ("tkinterdnd2", "tkinterdnd2")):
+                     ("tkinterdnd2", "tkinterdnd2"),
+                     ("win32clipboard", "pywin32")):
         try:
             __import__(mod)
         except ImportError:

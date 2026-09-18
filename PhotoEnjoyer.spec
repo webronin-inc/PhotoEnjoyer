@@ -14,14 +14,24 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 # ---- tkinterdnd2 ----
 dnd_datas, dnd_bins, dnd_hidden = collect_all("tkinterdnd2")
 
-# ---- публичный ключ Ed25519 ----
-key_path = HERE / "photogrid" / "public_key.pem"
+# ---- дополнительные ресурсы ----
 extra_datas = []
+
+# Публичный ключ Ed25519
+key_path = HERE / "photogrid" / "public_key.pem"
 if key_path.exists():
     extra_datas.append((str(key_path), "photogrid"))
     print(f"[spec] ✓ public_key.pem вшит")
 else:
     print(f"[spec] ⚠ public_key.pem не найден: {key_path}")
+
+# Иконка окна
+icon_path = HERE / "photogrid" / "icon.ico"
+if icon_path.exists():
+    extra_datas.append((str(icon_path), "photogrid"))
+    print(f"[spec] ✓ icon.ico вшит")
+else:
+    print(f"[spec] ⚠ icon.ico не найден: {icon_path}")
 
 # ---- весь пакет photogrid целиком ----
 photogrid_submodules = collect_submodules("photogrid")
@@ -32,7 +42,11 @@ a = Analysis(
     pathex=[str(HERE)],
     binaries=dnd_bins,
     datas=dnd_datas + extra_datas,
-    hiddenimports=dnd_hidden + photogrid_submodules,
+    hiddenimports=dnd_hidden + photogrid_submodules + [
+        "win32clipboard",
+        "win32con",
+        "win32api",
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
