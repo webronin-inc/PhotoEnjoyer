@@ -196,15 +196,26 @@ def final_report(has_installer):
     print("═" * 64)
     print(f"  ✅  {branding.APP_NAME} v{__version__}")
     print("═" * 64)
-    exe = DIST / EXE_NAME
-    if exe.exists():
-        print(f"  EXE:         {exe}")
-        print(f"  Размер:      {exe.stat().st_size / (1024*1024):.1f} МБ")
+
+    # onedir: EXE внутри папки
+    app_dir = DIST / branding.APP_EXE_NAME
+    exe = app_dir / EXE_NAME
+
+    if app_dir.exists():
+        print(f"  Папка приложения:  {app_dir}")
+        if exe.exists():
+            size_mb = exe.stat().st_size / (1024 * 1024)
+            print(f"  EXE:               {exe.name} ({size_mb:.1f} МБ)")
+
+        # размер всей папки
+        total = sum(f.stat().st_size for f in app_dir.rglob("*") if f.is_file())
+        print(f"  Вся папка:         {total / (1024*1024):.1f} МБ")
+
     if has_installer:
         setup = INSTALLER / f"{branding.APP_NAME}-Setup-{__version__}.exe"
         if setup.exists():
-            print(f"  Установщик:  {setup}")
-            print(f"  Размер:      {setup.stat().st_size / (1024*1024):.1f} МБ")
+            print(f"  Установщик:        {setup}")
+            print(f"  Размер:            {setup.stat().st_size / (1024*1024):.1f} МБ")
             print()
             print(f"  👉 Отдавайте людям: {setup.name}")
     print("═" * 64)

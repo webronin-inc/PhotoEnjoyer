@@ -64,10 +64,10 @@ Name: "autostart";       Description: "Запускать {#AppName} при ст
                          GroupDescription: "Дополнительно:"; Flags: unchecked
 
 [Files]
-Source: "dist\{#AppExeName}.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "dist\plugins\*";         DestDir: "{app}\plugins"; \
-       Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
-Source: "README.md";  DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+; Вся папка dist\PhotoEnjoyer\ целиком — onedir
+Source: "dist\{#AppExeName}\*"; DestDir: "{app}"; \
+    Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "README.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Icons]

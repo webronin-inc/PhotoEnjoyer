@@ -5,7 +5,6 @@ from pathlib import Path
 HERE = Path(SPECPATH).resolve()
 sys.path.insert(0, str(HERE))
 
-# Явно подгружаем пакет, чтобы PyInstaller точно его увидел
 import photogrid               # noqa: F401
 import photogrid.app           # noqa: F401
 
@@ -20,10 +19,9 @@ key_path = HERE / "photogrid" / "public_key.pem"
 extra_datas = []
 if key_path.exists():
     extra_datas.append((str(key_path), "photogrid"))
-    print(f"[spec] ✓ public_key.pem вшит: {key_path}")
+    print(f"[spec] ✓ public_key.pem вшит")
 else:
-    print(f"[spec] ❌ public_key.pem НЕ найден: {key_path}")
-    print(f"[spec]    подпись обновлений работать НЕ будет")
+    print(f"[spec] ⚠ public_key.pem не найден: {key_path}")
 
 # ---- весь пакет photogrid целиком ----
 photogrid_submodules = collect_submodules("photogrid")
@@ -33,32 +31,28 @@ a = Analysis(
     ["sikisiki.py"],
     pathex=[str(HERE)],
     binaries=dnd_bins,
-    datas=dnd_datas + extra_datas,               # ← добавили ключ
+    datas=dnd_datas + extra_datas,
     hiddenimports=dnd_hidden + photogrid_submodules,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
     noarchive=False,
 )
 
 pyz = PYZ(a.pure, a.zipped_data)
 
+# ВАЖНО для onedir: exclude_binaries=True
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name=branding.APP_EXE_NAME,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -67,4 +61,14 @@ exe = EXE(
     entitlements_file=None,
     icon=str(HERE / branding.APP_ICON)
         if (HERE / branding.APP_ICON).exists() else None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name=branding.APP_EXE_NAME,
 )
