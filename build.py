@@ -37,21 +37,43 @@ EXE_NAME  = f"{branding.APP_EXE_NAME}.exe" if sys.platform == "win32" \
 
 # ---------------------------------------------------------------- проверки
 def check_dependencies():
-    missing = []
-    for mod, pip in (("PyInstaller", "pyinstaller"),
-                     ("PIL", "pillow"),
-                     ("tkinterdnd2", "tkinterdnd2"),
-                     ("win32clipboard", "pywin32")):
+    # Обязательные
+    required = [
+        ("PyInstaller", "pyinstaller"),
+        ("PIL", "pillow"),
+        ("tkinterdnd2", "tkinterdnd2"),
+    ]
+    # Опциональные — сборка не падает, если их нет
+    optional = [
+        ("win32clipboard", "pywin32"),
+    ]
+
+    missing_req = []
+    for mod, pip in required:
         try:
             __import__(mod)
         except ImportError:
-            missing.append(pip)
-    if missing:
-        print("✗ Не хватает зависимостей:")
-        for m in missing:
+            missing_req.append(pip)
+
+    missing_opt = []
+    for mod, pip in optional:
+        try:
+            __import__(mod)
+        except ImportError:
+            missing_opt.append(pip)
+
+    if missing_req:
+        print("✗ Не хватает обязательных зависимостей:")
+        for m in missing_req:
             print(f"    • {m}")
-        print(f"\nУстановите: pip install {' '.join(missing)}")
+        print(f"\nУстановите: pip install {' '.join(missing_req)}")
         sys.exit(1)
+
+    if missing_opt:
+        print(f"⚠ Опциональные зависимости отсутствуют: {', '.join(missing_opt)}")
+        print(f"  Некоторые функции (например, копирование в буфер) работать не будут.")
+        print(f"  Установите: pip install {' '.join(missing_opt)}")
+
     print("✓ зависимости на месте")
 
 
