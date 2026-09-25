@@ -369,7 +369,8 @@ class _WatermarkDialog:
         wm_store["enabled"] = False
         try:
             img = build_collage(self.app.photos, self.app.config,
-                                for_preview=True)
+                                for_preview=True,
+                                captions=self.app.captions)
             img = self.app.apply_collage_hooks(img, for_preview=True)
         finally:
             wm_store["enabled"] = old_enabled

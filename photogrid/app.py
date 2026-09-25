@@ -40,6 +40,7 @@ class App:
         # ---- состояние ----
         _cols, _rows = LAYOUTS.get(self.config["layout"], (2, 2))
         self.photos = [None] * (_cols * _rows)
+        self.captions = [""] * (_cols * _rows)   # ← подписи под фото
 
         self._undo_stack = []
         self._redo_stack = []
@@ -508,25 +509,64 @@ class App:
             self.photos = self.photos[:total]
 
         self.thumb_refs = [None] * total
-        grid_cols = max(2, min(cols, 3))
+
+        # Синхронизируем список подписей под новое количество слотов
+        if len(self.captions) < total:
+            self.captions.extend([""] * (total - len(self.captions)))
+
+        # Колонок в сетке: не больше 3, но минимум 1
+        grid_cols = max(1, min(cols, 3))
 
         for i in range(total):
+            r = i // grid_cols
+            c = i % grid_cols
+
             slot = Slot(
                 self.slots_grid, p, i,
                 on_click=lambda e, idx=i: self.on_slot_click(idx),
                 on_right_click=lambda e, idx=i: self.on_slot_context_menu(e, idx),
                 on_double_click=lambda e, idx=i: self.on_slot_replace(idx),
             )
-            slot.grid(row=i // grid_cols, column=i % grid_cols,
-                      padx=6, pady=6)
+            slot.grid(row=r * 2, column=c, padx=6, pady=(6, 2))
             self.slot_widgets.append(slot)
+
+            # --- поле для подписи под слотом ---
+            cap_var = tk.StringVar(value=self.captions[i] if i < len(self.captions) else "")
+            entry = tk.Entry(
+                self.slots_grid,
+                textvariable=cap_var,
+                bg=p["slot_bg"], fg=p["text"],
+                insertbackground=p["text"],
+                bd=0, relief="flat",
+                font=("Segoe UI", 8),
+                justify="center",
+            )
+            entry.grid(row=r * 2 + 1, column=c,
+                       padx=6, pady=(0, 8), sticky="ew")
+
+            # сохраняем и обновляем превью при каждом изменении
+            cap_var.trace_add(
+                "write",
+                lambda *a, idx=i, v=cap_var: self._on_caption_var_change(idx, v),
+            )
+
+            # корректируем ширину колонки по слоту
+            self.slots_grid.columnconfigure(c, weight=0, minsize=168)
 
         self.slot_containers = self.slot_widgets
         self.slot_labels = self.slot_widgets
 
         for i in range(total):
             self.update_slot(i)
-
+    
+    def _on_caption_var_change(self, idx, var):
+        """Реагирует на ввод в поле подписи слота."""
+        text = var.get()
+        if idx >= len(self.captions):
+            while len(self.captions) <= idx:
+                self.captions.append("")
+        self.captions[idx] = text
+        self.schedule_preview()
     # ==================================================================
     #  STATUS BAR
     # ==================================================================
@@ -755,6 +795,7 @@ class App:
                     "border_color", "bg_color", "quality")
         state = {
             "photos": list(self.photos),
+            "captions": list(self.captions),
             "config": {k: self.config.get(k) for k in cfg_keys},
             "label": label,
         }
@@ -772,6 +813,7 @@ class App:
                     "border_color", "bg_color", "quality")
         current = {
             "photos": list(self.photos),
+            "captions": list(self.captions),
             "config": {k: self.config.get(k) for k in cfg_keys},
             "label": "",
         }
@@ -788,6 +830,7 @@ class App:
                     "border_color", "bg_color", "quality")
         current = {
             "photos": list(self.photos),
+            "captions": list(self.captions),
             "config": {k: self.config.get(k) for k in cfg_keys},
             "label": "",
         }
@@ -798,6 +841,7 @@ class App:
 
     def _apply_state(self, state):
         self.photos = list(state["photos"])
+        self.captions = list(state.get("captions", [""] * len(self.photos)))
         cfg = state["config"]
         for k, v in cfg.items():
             self.config[k] = v
@@ -880,7 +924,16 @@ class App:
             return
         self._push_undo("Очистка")
         self.photos = [None] * len(self.photos)
+        self.captions = [""] * len(self.photos)
+        # Обновляем визуальное содержимое всех слотов и подписей
+        for w in self.slots_grid.winfo_children():
+            w.destroy()
+        self.slot_widgets = []
+        self._build_slots()
         self.selected_slot = None
+        self.schedule_preview()
+        self.update_status()
+        return
         for i in range(len(self.photos)):
             self.update_slot(i)
         self.schedule_preview()
@@ -925,6 +978,7 @@ class App:
 
     def reload_ui(self):
         saved_photos = list(self.photos)
+        saved_captions = list(self.captions)
         saved_selected = self.selected_slot
         saved_last_save = self.last_save_path
 
@@ -967,6 +1021,7 @@ class App:
         self._bind_shortcuts()
 
         self.photos = saved_photos
+        self.captions = saved_captions
         self.selected_slot = saved_selected
         self.last_save_path = saved_last_save
 
@@ -1062,7 +1117,8 @@ class App:
             if hasattr(self, "status_bar"):
                 self.status_bar.set_progress(0.5)
                 self.root.update_idletasks()
-            img = build_collage(self.photos, self.config, for_preview=True)
+            img = build_collage(self.photos, self.config, for_preview=True,
+                                captions=self.captions)
             img = self.apply_collage_hooks(img, for_preview=True)
             img.thumbnail((620, 620), Image.LANCZOS)
             self.preview_ref = ImageTk.PhotoImage(img)
@@ -1091,7 +1147,8 @@ class App:
             return "Сначала выберите все фотографии!"
 
         try:
-            img = build_collage(self.photos, self.config, for_preview=False)
+            img = build_collage(self.photos, self.config, for_preview=False,
+                                captions=self.captions)
             img = self.apply_collage_hooks(img, for_preview=False)
         except Exception as e:
             return f"Не удалось собрать коллаж:\n{e}"
@@ -1151,7 +1208,15 @@ class App:
             save_path = filedialog.asksaveasfilename(
                 title="Сохранить результат",
                 defaultextension=".jpg",
-                filetypes=[("JPEG", "*.jpg"), ("PNG", "*.png"), ("Все файлы", "*.*")],
+                filetypes=[
+                    ("JPEG",   "*.jpg *.jpeg"),
+                    ("PNG",    "*.png"),
+                    ("WebP",   "*.webp"),
+                    ("TIFF",   "*.tif *.tiff"),
+                    ("BMP",    "*.bmp"),
+                    ("PDF",    "*.pdf"),
+                    ("Все файлы", "*.*"),
+                ],
                 initialfile="collage.jpg",
             )
             if not save_path:
@@ -1163,15 +1228,27 @@ class App:
             self.status_bar.set_progress(0.15)
             self.root.update_idletasks()
         try:
-            img = build_collage(self.photos, self.config, for_preview=False)
+            img = build_collage(self.photos, self.config, for_preview=False,
+                                captions=self.captions)
             img = self.apply_collage_hooks(img, for_preview=False)
             ext = os.path.splitext(save_path)[1].lower()
+            quality = int(self.config["quality"])
+
             if ext in (".jpg", ".jpeg"):
-                img.save(save_path, "JPEG",
-                         quality=int(self.config["quality"]), optimize=True)
+                img.save(save_path, "JPEG", quality=quality, optimize=True)
             elif ext == ".png":
-                img.save(save_path, "PNG")
+                img.save(save_path, "PNG", optimize=True)
+            elif ext == ".webp":
+                img.save(save_path, "WEBP", quality=quality, method=6)
+            elif ext in (".tif", ".tiff"):
+                img.save(save_path, "TIFF", compression="tiff_lzw")
+            elif ext == ".bmp":
+                img.save(save_path, "BMP")
+            elif ext == ".pdf":
+                img.save(save_path, "PDF", resolution=150,
+                         title="Collage")
             else:
+                # прочие расширения — Pillow сам разберётся
                 img.save(save_path)
 
             if hasattr(self, "status_bar"):
