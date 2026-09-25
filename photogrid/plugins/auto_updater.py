@@ -1,11 +1,12 @@
-"""Фоновые авто-проверки обновлений + бейджик 🔔 в шапке.
+"""Фоновые авто-проверки обновлений + анимированный значок в рельсе.
 
 Создаёт именованный mutex {APP_SLUG}SingleInstance — Inno Setup
-(параметр AppMutex в installer.iss) использует его, чтобы не
-переустанавливать файлы, пока приложение работает.
+использует его, чтобы не переустанавливать файлы, пока приложение работает.
+
+Значок обновления показывает app.set_update_badge() — он сам
+управляет видимостью и анимацией кнопки в боковой панели.
 """
 import sys
-import tkinter as tk
 
 from .. import branding, updater
 
@@ -13,7 +14,7 @@ from .. import branding, updater
 def register(app):
     _ensure_defaults(app)
     _create_single_instance_mutex()
-    _install_badge(app)
+    # Подписка: любое изменение состояния → показать/скрыть значок
     updater.subscribe(lambda info: _on_state_change(app, info))
     _schedule_next_check(app, first=True)
     app.plugin_flags["auto_updater"] = True
@@ -28,6 +29,7 @@ def _ensure_defaults(app):
 # ---------- mutex для Inno Setup ----------
 _mutex_handle = None
 
+
 def _create_single_instance_mutex():
     global _mutex_handle
     if sys.platform != "win32":
@@ -41,52 +43,14 @@ def _create_single_instance_mutex():
         pass
 
 
-# ---------- бейджик в шапке ----------
-def _install_badge(app):
-    p = app.palette
-    try:
-        parent = app.theme_button.master      # правый блок в header
-    except Exception:
-        return
-
-    badge = tk.Button(
-        parent,
-        text="🔔",
-        bg=p["accent"], fg="#ffffff",
-        activebackground=p["accent_hi"], activeforeground="#ffffff",
-        bd=0, relief="flat", highlightthickness=0, cursor="hand2",
-        font=("Segoe UI Emoji", 10, "bold"),
-        padx=10, pady=2,
-        command=lambda: _on_badge_click(app),
-    )
-    badge.pack_forget()                        # скрыт пока нет обновления
-    app._update_badge = badge
-
-
-def _on_badge_click(app):
-    from . import updater_ui
-    updater_ui.open_update_dialog(app)
-
-
+# ---------- реакция на изменение состояния ----------
 def _on_state_change(app, info):
-    badge = getattr(app, "_update_badge", None)
-    if badge is None:
-        return
+    """Показывает или скрывает анимированный значок обновления в рельсе.
 
-    if info:
-        badge.config(text=f"🔔 {info['remote']}")
-        if not badge.winfo_ismapped():
-            badge.pack(side=tk.RIGHT, padx=(0, 6))
-        try:
-            app.root.title(f"● {branding.window_title()}")
-        except Exception:
-            pass
-    else:
-        badge.pack_forget()
-        try:
-            app.root.title(branding.window_title())
-        except Exception:
-            pass
+    info — словарь из updater.analyze() или None.
+    """
+    if hasattr(app, "set_update_badge"):
+        app.set_update_badge(info)
 
 
 # ---------- периодическая проверка ----------

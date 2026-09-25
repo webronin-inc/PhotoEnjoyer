@@ -41,12 +41,11 @@ class App:
         _cols, _rows = LAYOUTS.get(self.config["layout"], (2, 2))
         self.photos = [None] * (_cols * _rows)
 
-        # История для отмены/повтора
         self._undo_stack = []
         self._redo_stack = []
         self._undo_limit = 50
         self._last_layout_cols_rows = (_cols, _rows)
-        self._status_reset_job = None       # ← инициализация до использования
+        self._status_reset_job = None
 
         self.selected_slot = None
         self.thumb_refs = [None] * len(self.photos)
@@ -60,7 +59,6 @@ class App:
         self.active_section = "collage"
         self.plugin_actions = {}
 
-        # ---- tk-переменные ----
         self.layout_var  = tk.StringVar(value=self.config["layout"])
         self.mode_var    = tk.StringVar(value=self.config["mode"])
         self.cell_var    = tk.IntVar(value=self.config["cell_size"])
@@ -78,7 +76,6 @@ class App:
         for v in (self.layout_var, self.mode_var, self.cell_var, self.border_var):
             v.trace_add("write", lambda *a: self._on_settings_change())
 
-        # Плагины
         from .plugins import loader
         loader.load_all(self)
         self._plugins_loaded = True
@@ -92,11 +89,8 @@ class App:
     #  ИКОНКА ОКНА
     # ==================================================================
     def _set_window_icon(self):
-        """Устанавливает свою иконку для окна и панели задач."""
         from pathlib import Path
-        candidates = [
-            Path(__file__).parent / "icon.ico",
-        ]
+        candidates = [Path(__file__).parent / "icon.ico"]
         meipass = getattr(sys, "_MEIPASS", None)
         if meipass:
             candidates.append(Path(meipass) / "photogrid" / "icon.ico")
@@ -164,6 +158,7 @@ class App:
         logo.pack()
         Tooltip(logo, branding.APP_NAME, p)
 
+        # разделы (верх)
         sections = [
             ("collage", "Коллаж", "Собрать коллаж из фото"),
             ("plugins", "Плагины", "Загруженные плагины и их действия"),
@@ -171,9 +166,7 @@ class App:
             ("cloud",   "Облако", "Экспорт в облако (скоро)"),
         ]
         for key, tip, desc in sections:
-            icon_kind = {"collage": "collage", "plugins": "plugins",
-                         "batch": "batch", "cloud": "cloud"}[key]
-            btn = RailButton(self.rail, p, kind=icon_kind, size=42,
+            btn = RailButton(self.rail, p, kind=key, size=42,
                              command=lambda k=key: self._set_section(k),
                              tooltip=tip)
             btn.pack(pady=3)
@@ -181,18 +174,25 @@ class App:
 
         tk.Frame(self.rail, bg=p["bg"]).pack(fill=tk.BOTH, expand=True)
 
+        # разделы (низ)
         bottom = [
-            ("theme",    "Тема",         self.toggle_theme),
-            ("settings", "Настройки",    self.show_settings),
-            ("help",     "Справка",      self.show_about),
+            ("theme",    "Тема",         self.toggle_theme,   False),
+            ("settings", "Настройки",    self.show_settings,  False),
+            ("update",   "Обновление",   self._on_update_click, True),
+            ("help",     "Справка",      self.show_about,     False),
         ]
-        for icon_kind, tip, cmd in bottom:
-            btn = RailButton(self.rail, p, kind=icon_kind, size=42,
-                             command=cmd, tooltip=tip)
+        for kind, tip, cmd, pulse in bottom:
+            btn = RailButton(self.rail, p, kind=kind, size=42,
+                             command=cmd, tooltip=tip, pulse=pulse)
             btn.pack(pady=3)
-            self.rail_buttons[icon_kind] = btn
+            self.rail_buttons[kind] = btn
 
         tk.Frame(self.rail, bg=p["bg"], height=16).pack()
+
+        # кнопка обновления скрыта по умолчанию
+        if "update" in self.rail_buttons:
+            self.rail_buttons["update"].pack_forget()
+
         self._set_section("collage")
 
     def _set_section(self, key):
@@ -233,6 +233,48 @@ class App:
     def show_settings(self):
         from .screens.settings import open_settings_dialog
         open_settings_dialog(self)
+
+    # ==================================================================
+    #  ОБНОВЛЕНИЯ
+    # ==================================================================
+    def _on_update_click(self):
+        """Клик по кнопке обновления в рельсе."""
+        try:
+            from .plugins import updater_ui
+            updater_ui.open_update_dialog(self)
+        except Exception as e:
+            print(f"[update] не удалось открыть диалог: {e}")
+
+    def set_update_badge(self, info):
+        """Показывает или прячет анимированную иконку обновления в рельсе.
+
+        info — словарь из updater.analyze() или None.
+        Вызывается из плагина auto_updater через подписку.
+        """
+        btn = self.rail_buttons.get("update")
+        if btn is None:
+            return
+
+        if info is None:
+            # Нет обновления — прячем
+            btn.pack_forget()
+            btn.set_active(False)
+        else:
+            version = info.get("remote", "")
+            btn.set_tooltip(f"Доступно обновление {version}\n"
+                            f"Нажмите для установки")
+            if not btn.winfo_ismapped():
+                help_btn = self.rail_buttons.get("help")
+                try:
+                    if help_btn is not None:
+                        btn.pack(pady=3, before=help_btn)
+                    else:
+                        btn.pack(pady=3)
+                except Exception:
+                    btn.pack(pady=3)
+            # Пульсируем — активируем анимацию
+            btn.set_active(True)
+            self.set_status(f"Доступна новая версия {version}")
 
     # ==================================================================
     #  ХЕЛПЕРЫ ПАНЕЛЕЙ
@@ -446,14 +488,12 @@ class App:
         )
         self.preview_label.pack(fill=tk.BOTH, expand=True)
 
-        # Регистрируем как collage view
         self.views["collage"] = body
 
     # ==================================================================
-    #  СЛОТЫ — динамические
+    #  СЛОТЫ
     # ==================================================================
     def _build_slots(self):
-        """Пересоздаёт слоты под текущую раскладку."""
         p = self.palette
         for w in self.slots_grid.winfo_children():
             w.destroy()
@@ -462,15 +502,12 @@ class App:
         cols, rows = LAYOUTS.get(self.config["layout"], (2, 2))
         total = cols * rows
 
-        # Нормализуем список фото под новое количество слотов
         if len(self.photos) < total:
             self.photos.extend([None] * (total - len(self.photos)))
         elif len(self.photos) > total:
             self.photos = self.photos[:total]
 
         self.thumb_refs = [None] * total
-
-        # Сетка слотов: не более 3 в ряд
         grid_cols = max(2, min(cols, 3))
 
         for i in range(total):
@@ -501,14 +538,11 @@ class App:
         self.status_bar = AnimatedStatusBar(self.root, p, height=34)
         self.status_bar.pack(fill=tk.X, side=tk.BOTTOM)
 
-        # Для совместимости со старым кодом
         self.status_var = tk.StringVar(value="Готово")
-
-        # Сброс отложенных сообщений (инициализация)
         self._status_reset_job = None
 
     # ==================================================================
-    #  СЛОТЫ: содержимое и миниатюры
+    #  СЛОТЫ: содержимое
     # ==================================================================
     def update_slot(self, idx):
         if idx >= len(self.slot_widgets):
@@ -541,7 +575,7 @@ class App:
         return ImageTk.PhotoImage(canvas)
 
     # ==================================================================
-    #  КЛИКИ ПО СЛОТАМ
+    #  КЛИКИ
     # ==================================================================
     def on_slot_click(self, idx):
         if self.photos[idx] is None:
@@ -574,7 +608,6 @@ class App:
             self.schedule_preview()
 
     def on_slot_context_menu(self, event, idx):
-        """ПКМ-меню на слоте."""
         p = self.palette
         menu = tk.Menu(self.root, tearoff=0)
         style_dropdown(menu, p)
@@ -644,7 +677,7 @@ class App:
             self.update_slot(old)
 
     # ==================================================================
-    #  ПОВОРОТ / ОТРАЖЕНИЕ / ПРОВОДНИК / ПУТЬ
+    #  ПОВОРОТ / ОТРАЖЕНИЕ
     # ==================================================================
     def rotate_slot(self, idx, degrees):
         import tempfile
@@ -895,7 +928,6 @@ class App:
         saved_selected = self.selected_slot
         saved_last_save = self.last_save_path
 
-        # Останавливаем старую анимацию статус-бара
         try:
             if hasattr(self, "status_bar"):
                 self.status_bar.stop()
@@ -950,6 +982,14 @@ class App:
             loader.load_all(self)
         except Exception as e:
             print(f"reload_ui: плагины не перезагружены: {e}")
+
+        # Восстанавливаем значок обновления
+        try:
+            from . import updater
+            pending = updater.get_pending()
+            self.set_update_badge(pending)
+        except Exception as e:
+            print(f"reload_ui: не удалось восстановить значок обновления: {e}")
 
         self.set_status("Тема применена")
 
@@ -1146,7 +1186,6 @@ class App:
                 f"Файл сохранён:\n{save_path}\n\n"
                 f"Размер: {img.width}×{img.height}\nОбъём: {size_mb:.2f} МБ")
 
-            # Сбрасываем прогресс с небольшой задержкой, чтобы пользователь увидел «100%»
             if hasattr(self, "status_bar"):
                 self.root.after(400, lambda: self.status_bar.set_progress(None))
         except Exception as e:
@@ -1159,13 +1198,11 @@ class App:
     #  СТАТУС / СПРАВКА
     # ==================================================================
     def set_status(self, text):
-        """Короткое сообщение (успех/ошибка/работа). Автосброс к базовому."""
         state = self._infer_status_state(text)
 
         if hasattr(self, "status_bar"):
             self.status_bar.set_status(text, state)
 
-        # Автосброс для временных сообщений
         if state in ("success", "error"):
             if self._status_reset_job:
                 try:
@@ -1175,7 +1212,6 @@ class App:
             self._status_reset_job = self.root.after(2500, self._reset_status)
 
     def _infer_status_state(self, text):
-        """Определяет визуальное состояние по тексту сообщения."""
         low = text.lower()
         if any(k in low for k in ("ошибка", "не удалось", "не найден", "не установлен")):
             return "error"
@@ -1188,12 +1224,10 @@ class App:
         return "ready"
 
     def _reset_status(self):
-        """Возвращает базовый статус после временного сообщения."""
         self._status_reset_job = None
         self.update_status()
 
     def update_status(self):
-        """Базовый статус — постоянный, пока не перебит временным."""
         if not hasattr(self, "status_bar"):
             return
 
@@ -1211,7 +1245,6 @@ class App:
         )
         self.status_bar.set_status(base, "ready")
 
-        # Метрики справа
         self.status_bar.set_metrics([
             ("отмены", len(self._undo_stack)),
             ("плагины", len(self.plugin_flags)),
@@ -1289,7 +1322,7 @@ class App:
         self.root.bind("<Control-Shift-C>", lambda e: self._copy_collage_shortcut())
         self.root.bind("<Control-comma>", lambda e: self.show_settings())
         self.root.bind("<Control-z>", lambda e: self.undo())
-        self.root.bind("<Control-Z>", lambda e: self.redo())   # Ctrl+Shift+Z
+        self.root.bind("<Control-Z>", lambda e: self.redo())
         self.root.bind("<Control-y>", lambda e: self.redo())
 
     def on_close(self):

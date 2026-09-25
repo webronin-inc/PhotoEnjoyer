@@ -22,6 +22,28 @@ def rounded_rect(canvas, x1, y1, x2, y2, radius=8, **kwargs):
 
 
 # ==============================================================
+#  Цветовые хелперы (перенесены наверх — используются везде)
+# ==============================================================
+def _blend_hex(c1, c2, alpha):
+    """Смешивает c1 (foreground) и c2 (background) с весом alpha 0..1."""
+    alpha = max(0.0, min(1.0, float(alpha)))
+
+    def to_rgb(h):
+        h = h.lstrip("#")
+        return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+    r1, g1, b1 = to_rgb(c1)
+    r2, g2, b2 = to_rgb(c2)
+    r = int(r1 * alpha + r2 * (1 - alpha))
+    g = int(g1 * alpha + g2 * (1 - alpha))
+    b = int(b1 * alpha + b2 * (1 - alpha))
+    r = max(0, min(255, r))
+    g = max(0, min(255, g))
+    b = max(0, min(255, b))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+# ==============================================================
 #  Иконочный шрифт
 # ==============================================================
 _ICON_FONT = None
@@ -76,6 +98,7 @@ _ICON_CHARS = {
     "menu":      "\uE700",
     "layers":    "\uE81E",
     "image":     "\uE91B",
+    "update":    "\uE895",
 }
 
 
@@ -131,6 +154,18 @@ def _draw_fallback_icon(canvas, kind, cx, cy, size=20, color="#ffffff"):
             x2 = cx + (r + s * 0.18) * math.cos(a)
             y2 = cy + (r + s * 0.18) * math.sin(a)
             canvas.create_line(x1, y1, x2, y2, fill=color, width=LW, capstyle=CAP)
+    elif kind == "update":
+        # круговая стрелка
+        r = s * 0.36
+        canvas.create_arc(cx - r, cy - r, cx + r, cy + r,
+                          start=40, extent=280, style="arc",
+                          outline=color, width=LW)
+        ax = cx + r * math.cos(math.radians(40))
+        ay = cy - r * math.sin(math.radians(40))
+        canvas.create_line(ax - s*0.1, ay - s*0.05, ax, ay,
+                           fill=color, width=LW, capstyle=CAP)
+        canvas.create_line(ax, ay, ax + s*0.08, ay - s*0.1,
+                           fill=color, width=LW, capstyle=CAP)
     else:
         canvas.create_polygon(
             cx, cy - s*0.35, cx + s*0.35, cy,
@@ -273,11 +308,17 @@ class LogoMark(tk.Canvas):
 
 
 # ==============================================================
-#  Кнопка раздела в рельсе
+#  Кнопка раздела в рельсе (с анимацией пульсации)
 # ==============================================================
 class RailButton(tk.Canvas):
+    """Кнопка раздела в рельсе.
+
+    Если pulse=True — при активном состоянии вокруг кнопки
+    пульсирует неоновый ореол (для значка обновления и т.п.).
+    """
+
     def __init__(self, master, palette, kind, size=42,
-                 command=None, tooltip=None, **kwargs):
+                 command=None, tooltip=None, pulse=False, **kwargs):
         super().__init__(
             master, width=size, height=size,
             bg=palette["bg"], highlightthickness=0,
@@ -290,14 +331,31 @@ class RailButton(tk.Canvas):
         self._hover = False
         self._active = False
 
+        # анимация
+        self._pulse_allowed = bool(pulse)
+        self._pulse_phase = 0.0
+        self._pulse_job = None
+
         self.bind("<Button-1>", lambda e: command() if command else None)
         self.bind("<Enter>", lambda e: self._set_hover(True))
         self.bind("<Leave>", lambda e: self._set_hover(False))
+        self.bind("<Destroy>", self._on_destroy)
+
         self._redraw()
 
-        if tooltip:
-            Tooltip(self, tooltip, palette)
+        self._tooltip = Tooltip(self, tooltip, palette) if tooltip else None
 
+        if self._pulse_allowed:
+            self._schedule_pulse()
+
+    # ---------- tooltip ----------
+    def set_tooltip(self, text):
+        if self._tooltip is None:
+            self._tooltip = Tooltip(self, text, self.palette)
+        else:
+            self._tooltip.text = text
+
+    # ---------- состояние ----------
     def set_active(self, active):
         self._active = active
         self._redraw()
@@ -306,6 +364,42 @@ class RailButton(tk.Canvas):
         self._hover = h
         self._redraw()
 
+    # ---------- анимация ----------
+    def _schedule_pulse(self):
+        if not self._pulse_allowed:
+            return
+        try:
+            self._pulse_job = self.after(50, self._pulse_tick)
+        except Exception:
+            self._pulse_job = None
+
+    def _pulse_tick(self):
+        self._pulse_job = None
+        if not self._pulse_allowed:
+            return
+        try:
+            if not self.winfo_exists():
+                return
+            self._pulse_phase = (self._pulse_phase + 0.05) % 1.0
+            if self._active:
+                self._redraw()
+        except tk.TclError:
+            return
+        except Exception:
+            pass
+        self._schedule_pulse()
+
+    def _on_destroy(self, event):
+        if event.widget is self:
+            self._pulse_allowed = False
+            if self._pulse_job is not None:
+                try:
+                    self.after_cancel(self._pulse_job)
+                except Exception:
+                    pass
+                self._pulse_job = None
+
+    # ---------- отрисовка ----------
     def _redraw(self):
         self.delete("all")
         p = self.palette
@@ -313,8 +407,24 @@ class RailButton(tk.Canvas):
         cx = s / 2
 
         if self._active:
+            # пульсирующий ореол внутри кнопки
+            if self._pulse_allowed:
+                pulse = abs(math.sin(self._pulse_phase * math.pi))
+                # 3 слоя обводки от внутреннего к внешнему
+                for i, (pad, base_alpha) in enumerate([
+                    (3, 0.35),
+                    (1, 0.55),
+                    (-1, 0.75),
+                ]):
+                    a = base_alpha * (0.5 + pulse * 0.5)
+                    col = _blend_hex(p["accent"], p["bg"], a)
+                    rounded_rect(self, pad, pad, s - pad, s - pad,
+                                 radius=11, fill="", outline=col, width=2)
+
+            # фон кнопки
             rounded_rect(self, 4, 4, s - 4, s - 4, radius=11,
                          fill=p["surface_alt"], outline="")
+            # акцентная полоска слева
             rounded_rect(self, -8, s * 0.28, -4, s * 0.72, radius=2,
                          fill=p["accent"], outline="")
             color = p["accent_hi"]
@@ -765,32 +875,9 @@ def enable_mousewheel(canvas):
 
 
 # ==============================================================
-#  Цветовые хелперы
-# ==============================================================
-def _blend_hex(c1, c2, alpha):
-    """Смешивает c1 (foreground) и c2 (background) с весом alpha 0..1."""
-    alpha = max(0.0, min(1.0, float(alpha)))
-
-    def to_rgb(h):
-        h = h.lstrip("#")
-        return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-
-    r1, g1, b1 = to_rgb(c1)
-    r2, g2, b2 = to_rgb(c2)
-    r = int(r1 * alpha + r2 * (1 - alpha))
-    g = int(g1 * alpha + g2 * (1 - alpha))
-    b = int(b1 * alpha + b2 * (1 - alpha))
-    r = max(0, min(255, r))
-    g = max(0, min(255, g))
-    b = max(0, min(255, b))
-    return f"#{r:02x}{g:02x}{b:02x}"
-
-
-# ==============================================================
 #  Анимированный неоновый статус-бар
 # ==============================================================
 class _Particle:
-    """Маленькая частица, дрейфующая по бару."""
     __slots__ = ("x", "y", "vx", "vy", "size", "alpha", "life")
 
     def __init__(self, w, h):
@@ -817,7 +904,6 @@ class _Particle:
 
 
 class _PulseRing:
-    """Расширяющееся кольцо от индикатора."""
     __slots__ = ("r", "max_r", "alpha", "color")
 
     def __init__(self, color, max_r=22):
@@ -836,9 +922,6 @@ class _PulseRing:
 
 
 class AnimatedStatusBar(tk.Canvas):
-    """Неоновый статус-бар с частицами, пульсовыми кольцами,
-    бегущей волной и ripple-эффектами при смене состояния."""
-
     _STATE_COLORS = {
         "ready":   ("success", "#4ade80"),
         "busy":    ("accent",  "#7c7cff"),
@@ -862,12 +945,10 @@ class AnimatedStatusBar(tk.Canvas):
         self._pre_progress_state = "ready"
         self._metrics = []
 
-        # анимационные счётчики
         self._phase = 0.0
         self._wave_pos = 0.0
-        self._ripple = 0.0          # 0..1 — расширяющийся ripple при смене state
+        self._ripple = 0.0
 
-        # частицы и кольца
         self._particles = [_Particle(self._width, self.height) for _ in range(14)]
         self._rings = []
 
@@ -880,12 +961,10 @@ class AnimatedStatusBar(tk.Canvas):
 
         self._schedule_tick()
 
-    # ---------------- API ----------------
     def set_status(self, text, state="ready"):
         if state != self._state:
             self._prev_state = self._state
             self._ripple = 1.0
-            # пусковой ripple: большое кольцо в цвете нового состояния
             color_key, _ = self._STATE_COLORS.get(state, ("accent", "#7c7cff"))
             color = self.palette.get(color_key, self.palette["accent"])
             self._rings.append(_PulseRing(color, max_r=self.height))
@@ -894,13 +973,10 @@ class AnimatedStatusBar(tk.Canvas):
         self._state = state
 
     def set_progress(self, value):
-        """Авто-режим busy: появление прогресса включает busy,
-        исчезновение — возвращает предыдущее состояние."""
         was_none = self._progress is None
         will_be_none = value is None
 
         if not was_none and will_be_none:
-            # прогресс завершился — возвращаемся к прежнему состоянию
             prev = self._pre_progress_state
             if prev != self._state:
                 self._prev_state = self._state
@@ -911,7 +987,6 @@ class AnimatedStatusBar(tk.Canvas):
             self._state = prev
             self._progress = None
         elif was_none and not will_be_none:
-            # прогресс появился — уходим в busy
             if self._state != "busy":
                 self._pre_progress_state = self._state
                 self._prev_state = self._state
@@ -935,7 +1010,6 @@ class AnimatedStatusBar(tk.Canvas):
                 pass
             self._job = None
 
-    # ---------------- цикл ----------------
     def _schedule_tick(self):
         if not self._running:
             return
@@ -958,15 +1032,12 @@ class AnimatedStatusBar(tk.Canvas):
             if self._state == "busy":
                 self._wave_pos = (self._wave_pos + 0.018) % 1.0
 
-            # ripple затухает
             if self._ripple > 0:
                 self._ripple = max(0.0, self._ripple - 0.05)
 
-            # частицы двигаются
             for pt in self._particles:
                 pt.step(self._width, self.height)
 
-            # кольца расширяются
             for ring in self._rings:
                 ring.step()
             self._rings = [r for r in self._rings if not r.dead]
@@ -993,12 +1064,10 @@ class AnimatedStatusBar(tk.Canvas):
 
     def _on_resize(self, e):
         self._width = e.width
-        # перераспределяем частицы под новую ширину
         for pt in self._particles:
             if pt.x > self._width:
                 pt.x = random.uniform(0, self._width)
 
-    # ---------------- отрисовка ----------------
     def _redraw(self):
         self.delete("all")
         p = self.palette
@@ -1007,21 +1076,16 @@ class AnimatedStatusBar(tk.Canvas):
         if w <= 0 or h <= 0:
             return
 
-        # основной цвет состояния
         color_key, _ = self._STATE_COLORS.get(self._state, ("accent", "#7c7cff"))
         state_color = p.get(color_key, p["accent"])
 
-        # ---------- фон ----------
         self.create_rectangle(0, 0, w, h, fill=p["bg"], outline="")
 
-        # ---------- ripple на весь бар ----------
         if self._ripple > 0:
             ripple_alpha = self._ripple * 0.12
-            # горизонтальная полоса-градиент от левого края
             steps = 32
             for i in range(steps):
                 t = i / (steps - 1)
-                # затухает к правому краю
                 a = ripple_alpha * (1 - t) * self._ripple
                 if a <= 0.005:
                     continue
@@ -1031,7 +1095,6 @@ class AnimatedStatusBar(tk.Canvas):
                 self.create_rectangle(x1, 0, x2, h,
                                       fill=mixed, outline=mixed)
 
-        # ---------- плавающие частицы ----------
         for pt in self._particles:
             if pt.x < -2 or pt.x > w + 2:
                 continue
@@ -1043,17 +1106,11 @@ class AnimatedStatusBar(tk.Canvas):
             self.create_oval(pt.x - r, pt.y - r, pt.x + r, pt.y + r,
                              fill=color, outline="")
 
-        # ---------- бегущая неоновая волна при busy ----------
         if self._state == "busy":
             marker_w = max(110, w // 5)
             marker_x = int(self._wave_pos * (w + marker_w)) - marker_w
 
-            # три слоя: яркое ядро, средний ореол, мягкий хвост
-            for layer, (mult, height_px, width_px) in enumerate([
-                (1.0, 2, 1.0),
-                (0.5, 4, 1.4),
-                (0.25, 6, 2.0),
-            ]):
+            for mult, height_px, _ in [(1.0, 2, 1.0), (0.5, 4, 1.4), (0.25, 6, 2.0)]:
                 segments = 32
                 for i in range(segments):
                     t = i / (segments - 1)
@@ -1070,7 +1127,6 @@ class AnimatedStatusBar(tk.Canvas):
                     self.create_rectangle(x1, 0, x2, height_px,
                                           fill=mixed, outline=mixed)
 
-            # яркая белая точка-голова волны
             head_x = marker_x + marker_w * 0.5
             if 0 <= head_x <= w:
                 glow_r = 8
@@ -1083,47 +1139,40 @@ class AnimatedStatusBar(tk.Canvas):
                 self.create_oval(head_x - 2, cy - 2, head_x + 2, cy + 2,
                                  fill="#ffffff", outline="")
 
-        # ---------- пульсовые кольца от индикатора ----------
         for ring in self._rings:
             color = _blend_hex(ring.color, p["bg"], ring.alpha)
             self.create_oval(20 - ring.r, cy - ring.r,
                              20 + ring.r, cy + ring.r,
                              outline=color, width=1)
 
-        # ---------- индикатор слева ----------
         if self._state == "ready":
             pulse = 4 + abs(math.sin(self._phase * math.pi)) * 1.0
         elif self._state == "busy":
             pulse = 4 + abs(math.sin(self._phase * math.pi)) * 2.2
         elif self._state == "error":
             pulse = 5 + abs(math.sin(self._phase * math.pi * 2)) * 1.5
-        else:  # success
+        else:
             pulse = 6
 
-        # многослойное свечение
         for layer, alpha in [(2.4, 0.10), (1.8, 0.18), (1.3, 0.30)]:
             glow = _blend_hex(state_color, p["bg"], alpha)
             r = pulse * layer
             self.create_oval(20 - r, cy - r, 20 + r, cy + r,
                              fill=glow, outline="")
-        # ядро
         self.create_oval(20 - pulse, cy - pulse,
                          20 + pulse, cy + pulse,
                          fill=state_color, outline="")
-        # точечный блик
         self.create_oval(20 - pulse * 0.35, cy - pulse * 0.35,
                          20 + pulse * 0.35, cy + pulse * 0.35,
                          fill=_blend_hex("#ffffff", state_color, 0.6),
                          outline="")
 
-        # ---------- текст ----------
         text_x = 40
         self.create_text(
             text_x, cy, text=self._text, anchor="w",
             fill=p["text"], font=("Segoe UI", 9),
         )
 
-        # ---------- прогресс с неоновым свечением ----------
         if self._progress is not None and self._progress > 0:
             approx_text_w = len(self._text) * 7 + 40
             bar_left = text_x + approx_text_w
@@ -1141,26 +1190,20 @@ class AnimatedStatusBar(tk.Canvas):
                 bar_y = cy - bar_h / 2
                 fill_w = int((bar_right - bar_left) * self._progress)
 
-                # фон трека
                 rounded_rect(self, bar_left, bar_y,
                              bar_right, bar_y + bar_h, radius=2,
                              fill=p["surface_hi"], outline="")
 
-                # ореол вокруг прогресса
                 if fill_w > 0:
                     glow_color = _blend_hex(p["accent"], p["bg"], 0.3)
                     rounded_rect(self, bar_left, bar_y - 3,
                                  bar_left + fill_w, bar_y + bar_h + 3,
-                                 radius=3,
-                                 fill="", outline=glow_color, width=2)
+                                 radius=3, fill="", outline=glow_color, width=2)
 
-                    # основной прогресс
                     rounded_rect(self, bar_left, bar_y,
                                  bar_left + fill_w, bar_y + bar_h,
-                                 radius=2,
-                                 fill=p["accent"], outline="")
+                                 radius=2, fill=p["accent"], outline="")
 
-                    # блик на прогрессе
                     if fill_w > 4:
                         rounded_rect(self, bar_left + 1, bar_y + 1,
                                      bar_left + fill_w - 1, bar_y + 2,
@@ -1168,13 +1211,10 @@ class AnimatedStatusBar(tk.Canvas):
                                      fill=_blend_hex("#ffffff", p["accent"], 0.4),
                                      outline="")
 
-                    # яркая точка на острие
                     tip_x = bar_left + fill_w
-                    self.create_oval(tip_x - 3, cy - 3,
-                                     tip_x + 3, cy + 3,
+                    self.create_oval(tip_x - 3, cy - 3, tip_x + 3, cy + 3,
                                      fill="#ffffff", outline="")
 
-        # ---------- метрики справа ----------
         if self._metrics:
             x = w - 16
             for label, value in reversed(self._metrics):
