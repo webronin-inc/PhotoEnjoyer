@@ -1,10 +1,10 @@
 {
-  "version": "0.0.0.2",
+  "version": "0.0.0.3",
   "release_date": "2026-09-18",
   "homepage": "https://github.com/webronin-inc/PhotoEnjoyer",
-  "download_url": "https://github.com/webronin-inc/PhotoEnjoyer/releases/download/v0.0.0.2/PhotoEnjoyer-Setup-0.0.0.2.exe",
+  "download_url": "https://github.com/webronin-inc/PhotoEnjoyer/releases/download/v0.0.0.3/PhotoEnjoyer-Setup-0.0.0.3.exe",
   "sha256": "",
-  "notes": "- Глобальное обновление программы! \n- Выпуск в релиз полноценной версии 0.0.0.2!\n- Улучшен весь функционал, который присутствовал на Beta - Test. \n- Функционал получил отдельные секции.\n- Произведена оптимизация.\n- Ускорен отклик и загрузка последующих обновлений!",
+  "notes": "- МЫ В ИГРЕ! ДОБРО ПОЖАЛОВАТЬ!\n- Глобальное обновление программы! \n- Выпуск в релиз полноценной версии 0.0.0.3!\n- Улучшен весь функционал, который присутствовал на Beta - Test. \n- Функционал получил отдельные секции.\n- Произведена оптимизация.\n- Ускорен отклик и загрузка последующих обновлений!",
   "plugins": [],
-  "signature": "uvJhivkrx1Mh9y1adPPeIbp4nDhzFM1g47AApCzDHiqeSfKZ3mfMGUA7mKl9s/bqrD7b5YUPh0iDyypSiCMFBA=="
+  "signature": "Lrac9roGB+1Gai+6SKo3oDws/kgvs+Oei6hJMZlDX24NSnyBQRxgRKLiY4AlSXm7GM6lmPqTjw7Q7hXZDhu9Dg=="
 }
