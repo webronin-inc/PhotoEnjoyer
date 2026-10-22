@@ -17,8 +17,8 @@ def test_version_parse():
     from photogrid.version import parse, compare, is_newer
     assert parse("5.0.2") == (5, 0, 2)
     assert parse("5.0") == (5, 0)
-        # "v5.0.2" → int("v5") падает → 0, дальше 0, 2
-    assert parse("v5.0.2") == (0, 0, 2)
+    # префикс "v" (как в теге v5.0.2) допускается
+    assert parse("v5.0.2") == (5, 0, 2)
     assert compare("5.0.2", "5.0.1") == 1
     assert compare("5.0.1", "5.0.2") == -1
     assert compare("5.0.1", "5.0.1") == 0

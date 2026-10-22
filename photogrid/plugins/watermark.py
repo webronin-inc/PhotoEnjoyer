@@ -3,13 +3,14 @@ import tkinter as tk
 from tkinter import colorchooser
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
+from .. import branding
 from ..core import build_collage
 from ..ui_widgets import GradientSlider
 
 
 DEFAULT = {
     "enabled": False,
-    "text": "© PhotoGrid",
+    "text": f"© {branding.APP_NAME}",
     "position": "bottom-right",
     "size_ratio": 0.035,
     "color": "#ffffff",

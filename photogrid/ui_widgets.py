@@ -542,8 +542,8 @@ class GradientSlider(tk.Canvas):
         except Exception:
             pass
 
-    def set(self, v):
-        self._set(v)
+    def set(self, v, notify=True):
+        self._set(v, notify=notify)
 
     def get(self):
         return self.value

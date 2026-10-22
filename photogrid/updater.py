@@ -104,27 +104,44 @@ def _sha256_file(path: Path) -> str:
 
 def download_file(url: str, dest: Path,
                   progress_cb=None, chunk: int = 65536) -> Path:
-    """Скачивает url в dest. progress_cb(got_bytes, total_bytes|None)."""
+    """Скачивает url в dest. progress_cb(got_bytes, total_bytes|None).
+
+    Пишет во временный *.part и подменяет файл только после полной загрузки,
+    поэтому обрыв связи не оставляет повреждённый файл (особенно важно для
+    плагинов, которые потом исполняются).
+    """
+    dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
+    part = dest.with_name(dest.name + ".part")
     req = urllib.request.Request(url, headers={
         "User-Agent": branding.user_agent(),
     })
-    with urllib.request.urlopen(req, timeout=30) as r:
-        total = None
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            total = None
+            try:
+                total = int(r.headers.get("Content-Length") or 0) or None
+            except Exception:
+                pass
+            got = 0
+            with open(part, "wb") as f:
+                while True:
+                    buf = r.read(chunk)
+                    if not buf:
+                        break
+                    f.write(buf)
+                    got += len(buf)
+                    if progress_cb:
+                        progress_cb(got, total)
+            if total and got != total:
+                raise IOError(f"загрузка оборвана: получено {got} из {total} байт")
+        os.replace(part, dest)
+    except BaseException:
         try:
-            total = int(r.headers.get("Content-Length") or 0) or None
-        except Exception:
+            part.unlink()
+        except OSError:
             pass
-        got = 0
-        with open(dest, "wb") as f:
-            while True:
-                buf = r.read(chunk)
-                if not buf:
-                    break
-                f.write(buf)
-                got += len(buf)
-                if progress_cb:
-                    progress_cb(got, total)
+        raise
     return dest
 
 
@@ -212,18 +229,29 @@ def apply_plugin_updates(plugins: list, progress_cb=None) -> list:
         sha = item.get("sha256", "")
         if not name or not url:
             continue
+        # только имя файла — защита от "../../x.py" в манифесте
+        name = Path(str(name)).name
+        if not name or name.startswith("."):
+            continue
         if not name.endswith(".py"):
             name += ".py"
         dest = target_dir / name
         report = {"name": name, "ok": False, "error": None}
+        staged = dest.with_name(dest.name + ".new")
         try:
-            download_file(url, dest, progress_cb=progress_cb)
-            if sha and not verify_sha256(dest, sha):
-                dest.unlink(missing_ok=True)
+            # сначала во временный файл, проверяем, и только потом заменяем —
+            # чтобы неудачное обновление не стёрло рабочий плагин
+            download_file(url, staged, progress_cb=progress_cb)
+            if sha and not verify_sha256(staged, sha):
                 raise ValueError("sha256 mismatch")
+            os.replace(staged, dest)
             report["ok"] = True
         except Exception as e:
             report["error"] = str(e)
+            try:
+                staged.unlink()
+            except OSError:
+                pass
         reports.append(report)
     return reports
 # =====================================================================
@@ -239,6 +267,14 @@ def subscribe(fn):
     try:
         fn(_pending["info"])
     except Exception:
+        pass
+
+
+def unsubscribe(fn):
+    """Отписка (нужна при перезагрузке интерфейса, чтобы не копились слушатели)."""
+    try:
+        _listeners.remove(fn)
+    except ValueError:
         pass
 
 
@@ -262,13 +298,19 @@ def get_pending():
 def check_async(root, url, callback, timeout=10):
     """Проверяет манифест в фоне. callback(info|None, exception|None) в UI-потоке."""
     def worker():
+        info, err = None, None
         try:
             manifest = fetch_manifest(url, timeout=timeout)
             info = analyze(manifest)
             info["_checked_url"] = url
-            root.after(0, lambda: callback(info, None))
         except Exception as e:
-            root.after(0, lambda: callback(None, e))
+            # Python 3 удаляет `e` при выходе из except — в lambda её
+            # использовать нельзя (NameError), поэтому сохраняем явно.
+            err = e
+        try:
+            root.after(0, lambda: callback(info, err))
+        except Exception:
+            pass  # окно уже закрыто
     threading.Thread(target=worker, daemon=True).start()
 
 
@@ -352,12 +394,10 @@ def run_installer_and_exit(installer_path, app, delay_ms: int = 5000):
     log(f"Установщик:  {local_setup}")
 
     if os.name == "nt":
-        # Аргументы для установщика (одной строкой, через пробел)
-        args = (
-            "/SILENT /SUPPRESSMSGBOXES /NORESTART "
-            "/CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS "
-            f'/LOG={install_log}'
-        )
+        flags = ["/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART",
+                 "/CLOSEAPPLICATIONS", "/FORCECLOSEAPPLICATIONS"]
+        # путь с пробелами должен быть в кавычках
+        args = " ".join(flags) + f' "/LOG={install_log}"'
 
         log(f"os.startfile: {local_setup}")
         log(f"args: {args}")
@@ -369,18 +409,16 @@ def run_installer_and_exit(installer_path, app, delay_ms: int = 5000):
             log("✓ os.startfile выполнен")
         except Exception as e:
             log(f"✗ os.startfile упал: {e}")
-            # Фоллбэк: обычный Popen
-            import subprocess
+            # Фоллбэк: обычный Popen (аргументы списком — без split по пробелам)
             DETACHED_PROCESS = 0x00000008
             CREATE_NEW_PROCESS_GROUP = 0x00000200
             subprocess.Popen(
-                [str(local_setup)] + args.split(),
+                [str(local_setup)] + flags + [f"/LOG={install_log}"],
                 creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
                 close_fds=True,
             )
             log("Запущен фоллбэк через Popen")
     else:
-        import subprocess
         subprocess.Popen([str(local_setup), "/SILENT"], start_new_session=True)
 
     log(f"Программа закроется через {delay_ms} мс")

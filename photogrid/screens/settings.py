@@ -183,7 +183,8 @@ class SettingsDialog:
         self._section(body, "О программе")
 
         about_lines = [
-            f"{branding.APP_NAME} · {branding.APP_TAGLINE}",
+            (f"{branding.APP_NAME} · {branding.APP_TAGLINE}"
+             if branding.APP_TAGLINE else branding.APP_NAME),
             f"© {branding.APP_PUBLISHER}",
             "Python · Tkinter · Pillow",
         ]
@@ -293,19 +294,27 @@ class SettingsDialog:
                                    "Удалить временные файлы приложения?"):
             return
         try:
-            d = Path(os.environ.get("ProgramData", r"C:\ProgramData")) / branding.APP_SLUG
+            import tempfile
             removed = 0
-            if d.exists():
-                for f in d.glob("PhotoEnjoyer-Setup-*.exe"):
+            pattern = f"{branding.APP_NAME}-Setup-*.exe"
+
+            # установщик скачивается во временную папку, его копия и логи —
+            # в ProgramData\<APP>
+            dirs = [Path(tempfile.gettempdir())]
+            if os.name == "nt":
+                dirs.append(Path(os.environ.get("ProgramData", r"C:\ProgramData"))
+                            / branding.APP_SLUG)
+            for d in dirs:
+                if not d.exists():
+                    continue
+                targets = list(d.glob(pattern))
+                if d.name == branding.APP_SLUG:
+                    targets += [d / "launch.log", d / "install.log"]
+                for f in targets:
                     try:
-                        f.unlink()
-                        removed += 1
-                    except Exception:
-                        pass
-                for name in ("launch.log", "install.log"):
-                    try:
-                        (d / name).unlink()
-                        removed += 1
+                        if f.exists():
+                            f.unlink()
+                            removed += 1
                     except Exception:
                         pass
             self.app.set_status(f"Кэш очищен: удалено {removed} файлов")
@@ -319,13 +328,12 @@ class SettingsDialog:
             "Сбросить ВСЕ настройки к значениям по умолчанию?"
         ):
             return
-        from ..config import DEFAULTS
-        for k, v in DEFAULTS.items():
-            if k != "theme":
-                self.config[k] = v
-        self.config.save()
+        # App.reset_settings синхронизирует и config, и переменные интерфейса.
+        # Раньше тут менялся только config, а reload_ui() перерисовывал окно
+        # по старым переменным — интерфейс показывал прежние значения и при
+        # следующем изменении записывал их обратно в config.
         self.top.destroy()
-        self.app.reload_ui()
+        self.app.reset_settings(confirm=False)
         messagebox.showinfo("Готово", "Настройки сброшены.")
 
     def _persist_non_theme_settings(self):

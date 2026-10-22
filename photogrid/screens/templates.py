@@ -276,7 +276,10 @@ class _TemplateCard(tk.Frame):
 # ==============================================================
 def _apply_template(app, tpl):
     try:
-        app.config["layout"] = tpl.get("layout", app.config["layout"])
+        from ..config import LAYOUTS
+        layout = tpl.get("layout", app.config["layout"])
+        if layout in LAYOUTS:
+            app.config["layout"] = layout
         app.config["mode"] = tpl.get("mode", app.config["mode"])
         app.config["cell_size"] = int(tpl.get("cell_size",
                                               app.config["cell_size"]))
@@ -284,20 +287,9 @@ def _apply_template(app, tpl):
         app.config["border_color"] = tpl.get("border_color",
                                              app.config["border_color"])
         app.config["bg_color"] = tpl.get("bg_color", app.config["bg_color"])
-        app.config.save()
 
-        # Обновить поля интерфейса
-        app.layout_var.set(app.config["layout"])
-        app.mode_var.set(app.config["mode"])
-        app.cell_var.set(app.config["cell_size"])
-        app.border_var.set(app.config["border"])
-        if hasattr(app, "border_color_btn"):
-            app.border_color_btn.set_color(app.config["border_color"])
-        if hasattr(app, "bg_color_btn"):
-            app.bg_color_btn.set_color(app.config["bg_color"])
-
-        app.schedule_preview()
-        app.update_status()
+        # единая синхронизация (см. App._sync_vars_from_config)
+        app._sync_vars_from_config()
         app.set_status(f"Шаблон применён: {tpl.get('name', '')}")
     except Exception as e:
         messagebox.showerror("Ошибка", f"Не удалось применить шаблон:\n{e}")

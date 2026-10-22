@@ -133,7 +133,10 @@ def build_plugins_view(parent, app):
                  font=("Segoe UI", 10)).pack(anchor="w", padx=8, pady=8)
     else:
         # Группируем по исходному меню: Файл / Правка / Вид / Справка
-        for menu_name in ("Файл", "Правка", "Вид", "Справка"):
+        # (меню, которые плагины создали сами, раньше просто не показывались)
+        known = ("Файл", "Правка", "Вид", "Справка")
+        order = list(known) + [m for m in actions if m not in known]
+        for menu_name in order:
             items = actions.get(menu_name, [])
             if not items:
                 continue
