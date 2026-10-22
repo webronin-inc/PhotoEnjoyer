@@ -1,16 +1,28 @@
 """Логика сборки коллажа. Не зависит от UI."""
-from PIL import Image
+from PIL import Image, ImageOps
 from .config import LAYOUTS
 
 
 def load_rgb(path, bg):
-    img = Image.open(path)
-    if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
-        img = img.convert("RGBA")
-        background = Image.new("RGB", img.size, bg)
-        background.paste(img, mask=img.split()[-1])
-        return background
-    return img.convert("RGB")
+    """Открывает изображение как RGB.
+
+    * учитывает EXIF-ориентацию (фото с телефона не «лежат на боку»);
+    * прозрачность заливает цветом bg;
+    * закрывает файл сразу (на Windows открытый файл нельзя удалить/перезаписать).
+    """
+    with Image.open(path) as im:
+        im.load()
+        try:
+            im = ImageOps.exif_transpose(im)
+        except Exception:
+            pass
+        if im.mode in ("RGBA", "LA", "PA") or (
+                im.mode == "P" and "transparency" in im.info):
+            rgba = im.convert("RGBA")
+            background = Image.new("RGB", rgba.size, bg)
+            background.paste(rgba, mask=rgba.split()[-1])
+            return background
+        return im.convert("RGB")
 
 
 def center_crop_resize(img, w, h):
@@ -35,7 +47,7 @@ def build_collage(photos, config, for_preview=False, captions=None):
     photos   — список путей (или None). Количество ячеек определяется раскладкой.
     captions — список подписей (по одной на слот), либо None.
     """
-    cols, rows = LAYOUTS[config["layout"]]
+    cols, rows = LAYOUTS.get(config["layout"], (2, 2))
     total_cells = cols * rows
 
     real_cell = max(50, int(config["cell_size"]))

@@ -1,25 +1,16 @@
 """Ручная обрезка каждого фото перед сборкой коллажа."""
-import os
-import tempfile
 import tkinter as tk
 from tkinter import messagebox, ttk
 from PIL import Image, ImageTk
 
 from ..core import load_rgb
-from .. import branding
 
-_state = {"originals": {}, "crops": {}, "tempdir": None}
+_state = {"originals": {}, "crops": {}}
 
 
 def register(app):
     app.add_menu_item("Правка", "Редактор обрезки…", lambda: _open(app))
     app.plugin_flags["crop_editor"] = True
-
-
-def _tempdir():
-    if _state["tempdir"] is None:
-        _state["tempdir"] = _state["tempdir"] = tempfile.mkdtemp(prefix=f"{branding.APP_SLUG.lower()}_crop_")
-    return _state["tempdir"]
 
 
 def _open(app):
@@ -38,6 +29,9 @@ class _CropDialog:
         self.rect = None
         self.sel_start = None
         self.sel_box = None
+        # до первой отрисовки (через 50 мс) клик по холсту не должен падать
+        self._disp_img = None
+        self._disp_pos = (0, 0)
 
         p = app.palette
         self.top = tk.Toplevel(app.root)
@@ -127,6 +121,8 @@ class _CropDialog:
         )
 
     def _in_bounds(self, x, y):
+        if self._disp_img is None:
+            return False
         x0, y0 = self._disp_pos
         return (x0 <= x <= x0 + self._disp_img.width
                 and y0 <= y <= y0 + self._disp_img.height)
@@ -164,7 +160,7 @@ class _CropDialog:
         self.sel_box = (x1, y1, x2, y2)
 
     def _apply(self):
-        if not self.sel_box:
+        if not self.sel_box or self._disp_img is None:
             messagebox.showinfo("Обрезка", "Сначала выделите область на фото", parent=self.top)
             return
         x1, y1, x2, y2 = self.sel_box
@@ -183,9 +179,12 @@ class _CropDialog:
 
         cropped = self.img_original.crop(box)
         idx = self.current_idx
-        out = os.path.join(_tempdir(), f"crop_{idx}.png")
+        # уникальное имя: фиксированное crop_<слот>.png перезаписывалось,
+        # и фото, переехавшее в другой слот, внезапно менялось
+        out = self.app.new_temp_path("crop")
         cropped.save(out, "PNG")
 
+        self.app._push_undo("Обрезка фото")
         _state["crops"][idx] = out
         self.app.photos[idx] = out
         self.app.update_slot(idx)
@@ -199,6 +198,7 @@ class _CropDialog:
             return
         orig = _state["originals"].get(idx)
         if orig:
+            self.app._push_undo("Сброс обрезки")
             self.app.photos[idx] = orig
             self.app.update_slot(idx)
             self.app.schedule_preview()

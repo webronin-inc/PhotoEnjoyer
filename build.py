@@ -191,8 +191,10 @@ def print_manifest_snippet(has_installer):
         return
 
     sha = _sha256(setup)
-    download = (f"https://github.com/USER/REPO/releases/download/"
-                f"v{__version__}/{setup.name}")
+    home = (branding.APP_HOMEPAGE or "").rstrip("/")
+    if not home.startswith("http"):
+        home = "https://github.com/USER/REPO"     # заполните вручную
+    download = f"{home}/releases/download/v{__version__}/{setup.name}"
 
     snippet = {
         "version": __version__,

@@ -4,7 +4,7 @@ import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from ..config import IMAGE_EXTS
+from ..config import IMAGE_EXTS, layout_cells
 from ..core import build_collage
 
 
@@ -31,7 +31,7 @@ def build_batch_view(parent, app):
              bg=p["bg"], fg=p["text"],
              font=("Segoe UI", 16, "bold"),
              anchor="w").pack(side=tk.LEFT)
-    tk.Label(head, text="Коллаж для каждой папки с 4+ фото",
+    tk.Label(head, text="Коллаж для каждой папки с набором фото по раскладке",
              bg=p["bg"], fg=p["text_dim"],
              font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(16, 0))
 
@@ -119,8 +119,9 @@ def build_batch_view(parent, app):
         font=("Consolas", 9), activestyle="none",
         selectbackground=p["surface_hi"],
     )
-    log_list.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
     log_scroll = tk.Scrollbar(log_frame, command=log_list.yview)
+    log_scroll.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 1), pady=1)
+    log_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=1, pady=1)
     log_list.config(yscrollcommand=log_scroll.set)
 
     # Связываем действия
@@ -159,13 +160,20 @@ def build_batch_view(parent, app):
         log_list.delete(0, "end")
         progress["value"] = 0
 
+        # Раньше здесь был setattr(state, "running", False) — но state это dict,
+        # поэтому падал AttributeError, флаг running навсегда оставался True,
+        # и вторая обработка за сеанс не запускалась.
+        def finished():
+            state["running"] = False
+            start_btn.config(state="normal")
+            stop_btn.config(state="disabled")
+
+        need = layout_cells(app.config["layout"])
         threading.Thread(
             target=_worker,
-            args=(app, state, in_dir, out_dir,
+            args=(app, state, in_dir, out_dir, need,
                   add_log, set_status, set_progress,
-                  lambda: (start_btn.config(state="normal"),
-                           stop_btn.config(state="disabled"),
-                           setattr(state, "running", False))),
+                  lambda: root.after(0, finished)),
             daemon=True,
         ).start()
 
@@ -194,14 +202,14 @@ def _pick_dir(var):
         var.set(d)
 
 
-def _worker(app, state, in_dir, out_dir, add_log, set_status, set_progress,
-            on_done):
+def _worker(app, state, in_dir, out_dir, need, add_log, set_status,
+            set_progress, on_done):
     try:
-        # Собираем задания: список (name, [4 пути])
-        jobs = _collect_jobs(state, in_dir, add_log)
+        # Собираем задания: список (name, [need путей])
+        jobs = _collect_jobs(state, in_dir, out_dir, need, add_log)
         total = len(jobs)
         if total == 0:
-            add_log("Не найдено папок с 4+ изображениями.")
+            add_log(f"Не найдено папок с {need}+ изображениями.")
             set_status("Нечего обрабатывать.")
             return
 
@@ -247,11 +255,24 @@ def _worker(app, state, in_dir, out_dir, add_log, set_status, set_progress,
         on_done()
 
 
-def _collect_jobs(state, in_dir, add_log):
-    """Возвращает список (имя, [пути 4 файлов])."""
+def _collect_jobs(state, in_dir, out_dir, need, add_log):
+    """Возвращает список (имя, [пути need файлов])."""
     jobs = []
+    used_names = set()
+    in_abs = os.path.abspath(in_dir)
+    out_abs = os.path.abspath(out_dir)
 
-    def scan(folder, prefix=""):
+    def unique(name):
+        # одинаковые имена папок в разных местах дерева раньше перезаписывали
+        # друг друга (или пропускались как «уже есть»)
+        base, n = name, 2
+        while name in used_names:
+            name = f"{base}-{n}"
+            n += 1
+        used_names.add(name)
+        return name
+
+    def scan(folder):
         try:
             files = sorted(
                 os.path.join(folder, f)
@@ -263,19 +284,23 @@ def _collect_jobs(state, in_dir, add_log):
             add_log(f"· Не прочитано: {folder} ({e})")
             return
 
-        # Папка целиком как одно задание (если 4+ фото)
-        if len(files) >= 4:
-            name = os.path.basename(folder) or "root"
-            if prefix:
-                name = f"{prefix}_{name}"
-            # Обрабатываем по 4 фото за раз
-            for i in range(0, len(files) - 3, 4):
-                chunk = files[i:i + 4]
-                if len(chunk) == 4:
-                    jobs.append((f"{name}_{i // 4 + 1:02d}", chunk))
+        if len(files) < need:
+            return
+        name = os.path.basename(folder.rstrip("\\/")) or "root"
+        if os.path.abspath(folder) != in_abs:
+            rel = os.path.relpath(folder, in_abs)
+            name = rel.replace(os.sep, "_")
+        # по need фото за раз
+        for i in range(0, len(files) - need + 1, need):
+            jobs.append((unique(f"{name}_{i // need + 1:02d}"),
+                         files[i:i + need]))
 
     if state["recursive"].get():
         for root, dirs, _files in os.walk(in_dir):
+            # папку результата (если она внутри входной) не обходим —
+            # иначе получатся коллажи из готовых коллажей
+            dirs[:] = sorted(d for d in dirs
+                             if os.path.abspath(os.path.join(root, d)) != out_abs)
             scan(root)
     else:
         scan(in_dir)

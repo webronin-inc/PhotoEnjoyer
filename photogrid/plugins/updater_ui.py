@@ -20,7 +20,7 @@ def register(app):
 
 def _ensure_defaults(app):
     u = app.config.data.setdefault("updates", {})
-    u.setdefault("manifest_url", updater.DEFAULT_MANIFEST_URL)
+    u["manifest_url"] = updater.DEFAULT_MANIFEST_URL
     u.setdefault("auto_check", True)
     u.setdefault("auto_install_plugins", True)
 
@@ -262,14 +262,17 @@ class _UpdateDialog:
         box = tk.Frame(parent, bg=p["surface_alt"])
         box.pack(side=tk.LEFT)
 
+        # NB: у самого виджета pady — одно число; кортеж (a, b) допустим только
+        # в pack()/grid(). Раньше здесь был pady=(6, 0) в конструкторе Label →
+        # TclError "bad screen distance", и окно обновления не открывалось.
         tk.Label(box, text=label, bg=p["surface_alt"], fg=p["text_dim"],
-                 font=("Segoe UI", 8), padx=12, pady=(6, 0),
-                 anchor="w").pack(fill=tk.X)
+                 font=("Segoe UI", 8), padx=12, anchor="w"
+                 ).pack(fill=tk.X, pady=(6, 0))
 
         tk.Label(box, text=version, bg=p["surface_alt"],
                  fg=p["text_dim"] if muted else ACCENT,
-                 font=("Segoe UI", 13, "bold"), padx=12, pady=(0, 6),
-                 anchor="w").pack(fill=tk.X)
+                 font=("Segoe UI", 13, "bold"), padx=12, anchor="w"
+                 ).pack(fill=tk.X, pady=(0, 6))
 
     # -----------------------------------------------------------------
     def _on_close_request(self):

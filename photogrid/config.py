@@ -1,7 +1,8 @@
 """Настройки, константы и их сохранение на диск."""
 import json
+import os
 from pathlib import Path
-from . import branding 
+from . import branding
 
 DEFAULTS = {
     "layout": "2×2 — квадрат",
@@ -37,6 +38,12 @@ LAYOUTS = {
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff", ".gif"}
 
 
+def layout_cells(layout_name):
+    """Сколько фото нужно для раскладки (для неизвестной — как у 2×2)."""
+    cols, rows = LAYOUTS.get(layout_name, (2, 2))
+    return cols * rows
+
+
 class Config:
     """Обёртка над JSON-файлом с настройками в домашней папке пользователя."""
 
@@ -47,22 +54,43 @@ class Config:
 
     def load(self):
         try:
-            if self.path.exists():
-                saved = json.loads(self.path.read_text(encoding="utf-8"))
-                for k in DEFAULTS:
-                    if k in saved:
-                        self.data[k] = saved[k]
-                if self.data["layout"] not in LAYOUTS:
-                    self.data["layout"] = DEFAULTS["layout"]
+            if not self.path.exists():
+                return
+            saved = json.loads(self.path.read_text(encoding="utf-8"))
         except Exception:
-            pass
+            return
+        if not isinstance(saved, dict):
+            return
+
+        # Раньше подхватывались только ключи из DEFAULTS, из-за чего
+        # настройки плагинов (watermark, updates…) терялись при перезапуске.
+        for k, v in saved.items():
+            if k in DEFAULTS:
+                # тип значения должен совпадать с типом по умолчанию
+                if isinstance(v, type(DEFAULTS[k])) and not isinstance(v, bool):
+                    self.data[k] = v
+                elif isinstance(DEFAULTS[k], float) and isinstance(v, int):
+                    self.data[k] = v
+            else:
+                self.data[k] = v
+
+        if self.data["layout"] not in LAYOUTS:
+            self.data["layout"] = DEFAULTS["layout"]
+        if self.data["mode"] not in ("fit", "fill"):
+            self.data["mode"] = DEFAULTS["mode"]
+        if self.data["theme"] not in ("dark", "light"):
+            self.data["theme"] = DEFAULTS["theme"]
 
     def save(self):
         try:
-            self.path.write_text(
+            # пишем во временный файл и подменяем — чтобы сбой посреди записи
+            # не оставил битый JSON
+            tmp = self.path.with_name(self.path.name + ".tmp")
+            tmp.write_text(
                 json.dumps(self.data, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
+            os.replace(tmp, self.path)
         except Exception:
             pass
 

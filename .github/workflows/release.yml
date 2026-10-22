@@ -29,6 +29,20 @@ jobs:
         with:
           python-version: '3.13'
 
+      - name: Verify tag matches app version
+        # Установщик называется по версии из photogrid/version.py, а ссылка в
+        # manifest.json строится из тега. При расхождении автообновление
+        # получало бы 404 — поэтому падаем до сборки.
+        shell: python
+        run: |
+          import os, sys
+          sys.path.insert(0, '.')
+          from photogrid.version import __version__
+          tag = os.environ['GITHUB_REF_NAME'].lstrip('vV')
+          if tag != __version__:
+              sys.exit(f'Тег {tag} не совпадает с photogrid/version.py ({__version__})')
+          print('Версия совпадает:', tag)
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -73,6 +87,14 @@ jobs:
 
           data = json.loads(Path('manifest.json').read_text(encoding='utf-8'))
           data['version'] = ver
+
+          # sha256 установщика — приложение сверяет его перед запуском
+          # (манифест подписан, значит хеш защищён подписью)
+          import hashlib
+          setup = Path(f'installer/PhotoEnjoyer-Setup-{ver}.exe')
+          if not setup.exists():
+              raise SystemExit(f'Не найден установщик {setup}')
+          data['sha256'] = hashlib.sha256(setup.read_bytes()).hexdigest()
           data['download_url'] = url
           data['release_date'] = __import__('datetime').date.today().isoformat()
           data['notes'] = notes

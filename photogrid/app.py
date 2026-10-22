@@ -1,7 +1,10 @@
 """Главный класс приложения PhotoGrid."""
 import os
 import random
+import shutil
 import sys
+import tempfile
+import uuid
 import tkinter as tk
 from tkinter import filedialog, messagebox, colorchooser
 
@@ -42,6 +45,8 @@ class App:
         self.photos = [None] * (_cols * _rows)
         self.captions = [""] * (_cols * _rows)   # ← подписи под фото
 
+        self._tmp_dir = None        # папка для временных файлов (поворот, вставка…)
+        self._syncing = False       # True, пока переменные UI синхронизируются с config
         self._undo_stack = []
         self._redo_stack = []
         self._undo_limit = 50
@@ -509,6 +514,9 @@ class App:
             self.photos = self.photos[:total]
 
         self.thumb_refs = [None] * total
+        # выделенный слот мог остаться за пределами новой раскладки
+        if self.selected_slot is not None and self.selected_slot >= total:
+            self.selected_slot = None
 
         # Синхронизируем список подписей под новое количество слотов
         if len(self.captions) < total:
@@ -706,6 +714,8 @@ class App:
         if path:
             self._push_undo("Замена фото")
             self.photos[idx] = path
+            if self.selected_slot == idx:
+                self.selected_slot = None
             self.update_slot(idx)
             self.schedule_preview()
             self.update_status()
@@ -719,46 +729,51 @@ class App:
     # ==================================================================
     #  ПОВОРОТ / ОТРАЖЕНИЕ
     # ==================================================================
-    def rotate_slot(self, idx, degrees):
-        import tempfile
-        from pathlib import Path
-        path = self.photos[idx]
+    def new_temp_path(self, prefix="pe", suffix=".png"):
+        """Уникальный путь во временной папке приложения.
+
+        Имена обязаны быть уникальными: раньше файл вида pe_rot_<слот>_90.png
+        перезаписывался следующим поворотом, и в другом слоте/в undo
+        внезапно оказывалась «чужая» картинка.
+        """
+        if self._tmp_dir is None or not os.path.isdir(self._tmp_dir):
+            self._tmp_dir = tempfile.mkdtemp(
+                prefix=f"{branding.APP_SLUG.lower()}_")
+        return os.path.join(self._tmp_dir,
+                            f"{prefix}_{uuid.uuid4().hex[:12]}{suffix}")
+
+    def _transform_slot(self, idx, fn, undo_label, status_text, error_text):
+        from .core import load_rgb
+        path = self.photos[idx] if idx < len(self.photos) else None
         if path is None:
             return
         try:
-            img = Image.open(path)
-            rotated = img.rotate(-degrees, expand=True)
-            out = Path(tempfile.gettempdir()) / f"pe_rot_{idx}_{abs(degrees)}.png"
-            rotated.convert("RGB").save(out, "PNG")
-            self._push_undo("Поворот фото")
-            self.photos[idx] = str(out)
+            # load_rgb учитывает EXIF-ориентацию и прозрачность — результат
+            # совпадает с тем, что видно в превью
+            img = load_rgb(path, self.config["bg_color"])
+            out = self.new_temp_path("pe_edit")
+            fn(img).save(out, "PNG")
+            self._push_undo(undo_label)
+            self.photos[idx] = out
             self.update_slot(idx)
             self.schedule_preview()
-            self.set_status(f"Фото {idx + 1} повёрнуто на {degrees}°")
+            self.set_status(status_text)
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось повернуть:\n{e}")
+            messagebox.showerror("Ошибка", f"{error_text}:\n{e}")
+
+    def rotate_slot(self, idx, degrees):
+        self._transform_slot(
+            idx, lambda im: im.rotate(-degrees, expand=True),
+            "Поворот фото", f"Фото {idx + 1} повёрнуто на {degrees}°",
+            "Не удалось повернуть")
 
     def flip_slot(self, idx, direction="h"):
-        import tempfile
-        from pathlib import Path
-        path = self.photos[idx]
-        if path is None:
-            return
-        try:
-            img = Image.open(path)
-            if direction == "h":
-                flipped = img.transpose(Image.FLIP_LEFT_RIGHT)
-            else:
-                flipped = img.transpose(Image.FLIP_TOP_BOTTOM)
-            out = Path(tempfile.gettempdir()) / f"pe_flip_{idx}_{direction}.png"
-            flipped.convert("RGB").save(out, "PNG")
-            self._push_undo("Отражение фото")
-            self.photos[idx] = str(out)
-            self.update_slot(idx)
-            self.schedule_preview()
-            self.set_status(f"Фото {idx + 1} отражено")
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось отразить:\n{e}")
+        method = (Image.FLIP_LEFT_RIGHT if direction == "h"
+                  else Image.FLIP_TOP_BOTTOM)
+        self._transform_slot(
+            idx, lambda im: im.transpose(method),
+            "Отражение фото", f"Фото {idx + 1} отражено",
+            "Не удалось отразить")
 
     def reveal_in_explorer(self, idx):
         path = self.photos[idx]
@@ -839,33 +854,53 @@ class App:
         self._apply_state(state)
         self.set_status("Повторено")
 
-    def _apply_state(self, state):
-        self.photos = list(state["photos"])
-        self.captions = list(state.get("captions", [""] * len(self.photos)))
-        cfg = state["config"]
-        for k, v in cfg.items():
-            self.config[k] = v
-        self.config.save()
+    def _sync_vars_from_config(self):
+        """Переносит значения из config в переменные/виджеты интерфейса.
 
-        self.layout_var.set(self.config["layout"])
-        self.mode_var.set(self.config["mode"])
-        self.cell_var.set(self.config["cell_size"])
-        self.border_var.set(self.config["border"])
-        self.quality_var.set(self.config["quality"])
+        Переменные layout/mode/cell/border имеют trace, который пишет их
+        значения обратно в config. Если выставлять их по одной, каждый trace
+        затирал ещё не обновлённые значения старыми (так не применялись
+        mode/размер/рамка из шаблона, сброс настроек и undo). Поэтому trace на
+        время синхронизации выключен, а итоговое состояние применяется один раз.
+        """
+        self._syncing = True
+        try:
+            self.layout_var.set(self.config["layout"])
+            self.mode_var.set(self.config["mode"])
+            self.cell_var.set(self.config["cell_size"])
+            self.border_var.set(self.config["border"])
+            self.quality_var.set(self.config["quality"])
+        finally:
+            self._syncing = False
+
         if hasattr(self, "quality_label"):
-            self.quality_label.config(text=f"{self.config['quality']}%")
+            self.quality_label.config(text=f"{int(self.config['quality'])}%")
         if hasattr(self, "quality_slider"):
-            self.quality_slider.set(self.config["quality"])
+            self.quality_slider.set(self.config["quality"], notify=False)
         if hasattr(self, "border_color_btn"):
             self.border_color_btn.set_color(self.config["border_color"])
         if hasattr(self, "bg_color_btn"):
             self.bg_color_btn.set_color(self.config["bg_color"])
 
-        self._last_layout_cols_rows = LAYOUTS.get(
-            self.config["layout"], (2, 2))
-        self._build_slots()
+        new_layout = LAYOUTS.get(self.config["layout"], (2, 2))
+        if self._last_layout_cols_rows != new_layout:
+            self._last_layout_cols_rows = new_layout
+            self._build_slots()
+
+        self.config.save()
         self.schedule_preview()
         self.update_status()
+
+    def _apply_state(self, state):
+        self.photos = list(state["photos"])
+        self.captions = list(state.get("captions", [""] * len(self.photos)))
+        for k, v in state["config"].items():
+            self.config[k] = v
+
+        # слоты пересобираем всегда (фото/подписи заменены целиком)
+        self._last_layout_cols_rows = LAYOUTS.get(self.config["layout"], (2, 2))
+        self._sync_vars_from_config()
+        self._build_slots()
 
     # ==================================================================
     #  ДЕЙСТВИЯ
@@ -886,6 +921,33 @@ class App:
         self.selected_slot = None
         self.schedule_preview()
         self.update_status()
+
+    def fill_slots(self, files, start=None, undo_label="Вставка фото"):
+        """Раскладывает файлы по слотам начиная с start (по кругу).
+
+        start=None — с выделенного слота, иначе с первого пустого.
+        Число слотов берётся из текущей раскладки (а не «всегда 4»).
+        Возвращает, сколько файлов размещено.
+        """
+        n = len(self.photos)
+        files = list(files)[:n]
+        if n == 0 or not files:
+            return 0
+        if start is None:
+            start = self.selected_slot
+        if start is None:
+            start = next((i for i, p in enumerate(self.photos) if p is None), 0)
+        start = start % n
+
+        self._push_undo(undo_label)
+        for k, path in enumerate(files):
+            idx = (start + k) % n
+            self.photos[idx] = path
+            self.update_slot(idx)
+        self.selected_slot = None
+        self.schedule_preview()
+        self.update_status()
+        return len(files)
 
     def load_from_folder(self):
         folder = filedialog.askdirectory(title="Выберите папку с фотографиями")
@@ -933,11 +995,6 @@ class App:
         self.selected_slot = None
         self.schedule_preview()
         self.update_status()
-        return
-        for i in range(len(self.photos)):
-            self.update_slot(i)
-        self.schedule_preview()
-        self.update_status()
 
     def shuffle_photos(self):
         self._push_undo("Перемешивание")
@@ -949,27 +1006,14 @@ class App:
         self.selected_slot = None
         self.schedule_preview()
 
-    def reset_settings(self):
-        if not messagebox.askyesno("Сброс", "Сбросить все настройки по умолчанию?"):
+    def reset_settings(self, confirm=True):
+        if confirm and not messagebox.askyesno(
+                "Сброс", "Сбросить все настройки по умолчанию?"):
             return
         for k, v in DEFAULTS.items():
             if k != "theme":
                 self.config[k] = v
-        self.layout_var.set(self.config["layout"])
-        self.mode_var.set(self.config["mode"])
-        self.cell_var.set(self.config["cell_size"])
-        self.border_var.set(self.config["border"])
-        self.quality_var.set(self.config["quality"])
-        if hasattr(self, "quality_label"):
-            self.quality_label.config(text=f"{self.config['quality']}%")
-        if hasattr(self, "border_color_btn"):
-            self.border_color_btn.set_color(self.config["border_color"])
-        if hasattr(self, "bg_color_btn"):
-            self.bg_color_btn.set_color(self.config["bg_color"])
-        if hasattr(self, "quality_slider"):
-            self.quality_slider.set(self.config["quality"])
-        self.config.save()
-        self.update_preview()
+        self._sync_vars_from_config()
 
     def toggle_theme(self):
         self.config["theme"] = "light" if self.config["theme"] == "dark" else "dark"
@@ -1034,6 +1078,9 @@ class App:
             from .plugins import loader
             self.plugin_flags.clear()
             self.plugin_actions.clear()
+            # плагины регистрируются заново — без очистки хук водяного знака
+            # накладывался бы повторно после каждой смены темы
+            self.collage_hooks.clear()
             loader.load_all(self)
         except Exception as e:
             print(f"reload_ui: плагины не перезагружены: {e}")
@@ -1073,6 +1120,8 @@ class App:
         self.config.save()
 
     def _on_settings_change(self):
+        if self._syncing:
+            return
         try:
             self.config["layout"] = self.layout_var.get()
             self.config["mode"] = self.mode_var.get()
@@ -1292,11 +1341,12 @@ class App:
         low = text.lower()
         if any(k in low for k in ("ошибка", "не удалось", "не найден", "не установлен")):
             return "error"
-        if any(k in low for k in ("сохран", "загруз", "обновля", "обработ",
-                                  "примен", "проверка", "подготовка")):
+        # Раньше «busy» проверялся по подстроке «сохран», из-за чего «Сохранено…»
+        # и «Шаблон сохранён» навсегда оставляли индикатор в режиме «занято».
+        if text.rstrip().endswith(("…", "...")):
             return "busy"
-        if any(k in low for k in ("готово", "сохранено", "скопирован",
-                                  "применена", "применено")):
+        if any(k in low for k in ("готово", "сохранён", "сохранен", "скопирован",
+                                  "применён", "применен", "загружен")):
             return "success"
         return "ready"
 
@@ -1409,6 +1459,8 @@ class App:
         except Exception:
             pass
         self.config.save()
+        if self._tmp_dir:
+            shutil.rmtree(self._tmp_dir, ignore_errors=True)
         self.root.destroy()
 
 
@@ -1420,4 +1472,15 @@ def run():
         root = tk.Tk()
         print("ℹ tkinterdnd2 не установлен — drag & drop будет отключён.")
     app = App(root)
+
+    # ярлык «Проверить обновления» из меню Пуск запускает программу с этим ключом
+    if "--check-updates" in sys.argv:
+        def _check_now():
+            try:
+                from .plugins import updater_ui
+                updater_ui.open_update_dialog(app)
+            except Exception as e:
+                print(f"[update] --check-updates: {e}")
+        root.after(1500, _check_now)
+
     root.mainloop()

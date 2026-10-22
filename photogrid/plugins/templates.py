@@ -44,22 +44,20 @@ def _collect_current(app):
 
 
 def _apply(app, tpl):
+    from ..config import LAYOUTS
     for k in KEYS:
-        if k in tpl and tpl[k] is not None:
-            app.config[k] = tpl[k]
-    app.layout_var.set(app.config["layout"])
-    app.mode_var.set(app.config["mode"])
-    app.cell_var.set(app.config["cell_size"])
-    app.border_var.set(app.config["border"])
-    app.quality_var.set(app.config["quality"])
-    app.quality_label.config(text=f"{app.config['quality']}%")
-    app.border_color_btn.config(bg=app.config["border_color"])
-    app.bg_color_btn.config(bg=app.config["bg_color"])
+        if k not in tpl or tpl[k] is None:
+            continue
+        if k == "layout" and tpl[k] not in LAYOUTS:
+            continue          # раскладка из старой версии — не ломаем конфиг
+        app.config[k] = tpl[k]
+
+    # Раньше переменные выставлялись по одной, и trace layout_var затирал
+    # mode/размер/рамку старыми значениями; цвета меняли фон Canvas вместо
+    # цвета образца. Теперь всё синхронизируется одним вызовом.
+    app._sync_vars_from_config()
     if tpl.get("watermark"):
         app.plugin_flags["watermark"] = bool(tpl["watermark"].get("enabled"))
-    app.config.save()
-    app.update_preview()
-    app.update_status()
 
 
 def _save(app):

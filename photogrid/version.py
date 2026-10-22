@@ -4,8 +4,10 @@ __release_date__ = "2026-09-17"
 
 
 def parse(v: str):
-    """'5.0.1-beta' -> (5, 0, 1)"""
+    """'5.0.1-beta' -> (5, 0, 1); префикс 'v' (тег v5.0.1) допускается."""
     v = (v or "0").strip()
+    if v[:1] in ("v", "V"):
+        v = v[1:]
     main = v.split("-")[0].split("+")[0]
     nums = []
     for part in main.split("."):
