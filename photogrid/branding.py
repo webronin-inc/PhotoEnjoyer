@@ -6,8 +6,11 @@
 APP_NAME       = "PhotoEnjoyer"          # ← название, которое видит пользователь
 APP_TAGLINE    = ""
 APP_PUBLISHER  = "EndlessOder inc"        # для "О программе" и метаданных EXE
-APP_HOMEPAGE   = "@disperial"
-APP_EMAIL      = "@disperial"
+APP_HOMEPAGE   = "https://github.com/webronin-inc/PhotoEnjoyer"  # открывается в браузере
+APP_EMAIL      = "@disperial"                 # контакт автора (показывается в «О программе»)
+
+# URL манифеста обновлений
+APP_MANIFEST_URL = "https://raw.githubusercontent.com/webronin-inc/PhotoEnjoyer/refs/heads/main/manifest.json"
 
 # Технические имена (для файлов и папок). Обычно = APP_NAME, но без пробелов.
 APP_SLUG       = APP_NAME.replace(" ", "")          # "PhotoGrid"
@@ -31,15 +34,15 @@ def user_agent() -> str:
 
 def about_text() -> str:
     from .version import __version__, __release_date__
+    head = f"{APP_NAME} v{__version__}   ({__release_date__})"
+    if APP_TAGLINE:
+        head += f"\n{APP_TAGLINE}"
     return (
-        f"{APP_NAME} v{__version__}   ({__release_date__})\n"
-        f"{APP_TAGLINE}\n\n"
-        f"Модульное приложение для объединения 4 фото в таблицу.\n"
-        f"Раскладки 2×2, 4×1, 1×4 · рамки · режимы вписать/заполнить\n"
-        f"предпросмотр · авто-загрузка · drag & drop · плагины.\n\n"
+        f"{head}\n\n"
+        f"Модульное приложение для объединения фото в одну таблицу.\n"
+        f"Раскладки от 1×1 до 3×3 · рамки · режимы вписать/заполнить\n"
+        f"предпросмотр · подписи · drag & drop · плагины.\n\n"
         f"© {APP_PUBLISHER}\n"
         f"{APP_HOMEPAGE}\n"
         f"{APP_EMAIL}"
     )
-    # URL манифеста обновлений. Замените USER/REPO на свои.
-APP_MANIFEST_URL = "https://raw.githubusercontent.com/webronin-inc/PhotoEnjoyer/refs/heads/main/manifest.json"

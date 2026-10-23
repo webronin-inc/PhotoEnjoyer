@@ -47,17 +47,17 @@ def _wrap(fn, app, idx):
 
 
 def _on_enter(app, _event, idx):
-    p = app.palette
-    slot = app.slot_containers[idx]
-    slot.config(highlightbackground=p["accent"],
-                highlightcolor=p["accent"],
-                bg=p["surface_hi"])
-    for w in slot.winfo_children():
-        if isinstance(w, tk.Label) and not w.cget("image"):
-            w.config(bg=p["surface_hi"])
+    # подсветка через штатную отрисовку слота (раньше менялся bg Canvas,
+    # и после перетаскивания слот оставался с «чужим» фоном)
+    if idx < len(app.slot_containers):
+        slot = app.slot_containers[idx]
+        slot.hover = True
+        slot._redraw()
 
 
 def _on_leave(app, _event, idx):
+    if idx < len(app.slot_containers):
+        app.slot_containers[idx].hover = False
     app.update_slot(idx)
 
 
@@ -72,8 +72,10 @@ def _on_drop(app, event, idx):
         if os.path.isdir(item):
             try:
                 for name in sorted(os.listdir(item)):
-                    if os.path.splitext(name)[1].lower() in IMAGE_EXTS:
-                        files.append(os.path.join(item, name))
+                    full = os.path.join(item, name)
+                    if (os.path.splitext(name)[1].lower() in IMAGE_EXTS
+                            and os.path.isfile(full)):
+                        files.append(full)
             except Exception:
                 pass
         elif os.path.splitext(item)[1].lower() in IMAGE_EXTS:
@@ -84,13 +86,6 @@ def _on_drop(app, event, idx):
         _on_leave(app, None, idx)
         return
 
-    files = files[:4]
-    for k, path in enumerate(files):
-        target = (idx + k) % 4
-        app.photos[target] = path
-        app.update_slot(target)
-
-    app.selected_slot = None
-    app.schedule_preview()
-    app.update_status()
-    app.set_status(f"Перетащено файлов: {len(files)} → слот {idx + 1}")
+    placed = app.fill_slots(files, start=idx, undo_label="Перетаскивание фото")
+    _on_leave(app, None, idx)
+    app.set_status(f"Перетащено файлов: {placed} → слот {idx + 1}")

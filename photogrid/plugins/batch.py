@@ -1,10 +1,11 @@
-"""Пакетная обработка папок: для каждой подпапки — коллаж из первых 4 фото."""
+"""Пакетная обработка папок: для каждой подпапки — коллаж из первых N фото
+(N — число ячеек в выбранной раскладке)."""
 import os
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from ..config import IMAGE_EXTS
+from ..config import IMAGE_EXTS, layout_cells
 from ..core import build_collage
 
 
@@ -42,7 +43,9 @@ class _BatchDialog:
         ttk.Button(row, text="…", width=3, command=self._pick_out).pack(side=tk.LEFT, padx=(6, 0))
 
         self.flat_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(self.top, text="Также разбить файлы в корне папки по 4 шт.",
+        self.need = layout_cells(app.config["layout"])
+        ttk.Checkbutton(self.top,
+                        text=f"Также разбить файлы в корне папки по {self.need} шт.",
                         variable=self.flat_var).pack(anchor="w", **pad)
 
         tk.Label(self.top, text="Прогресс:", bg=p["surface"], fg=p["text"]
@@ -92,6 +95,8 @@ class _BatchDialog:
             messagebox.showwarning("Внимание", "Выберите папку для сохранения", parent=self.top)
             return
         os.makedirs(out, exist_ok=True)
+        self.need = layout_cells(self.app.config["layout"])
+        self.out_abs = os.path.abspath(out)
         self.start_btn.config(state="disabled")
         self.stop_flag = False
         self.log.delete(0, "end")
@@ -124,6 +129,7 @@ class _BatchDialog:
             self.top.after(0, lambda: self.start_btn.config(state="normal"))
 
     def _collect_jobs(self, src):
+        need = self.need
         jobs = []
         if self.flat_var.get():
             files = sorted(
@@ -131,22 +137,26 @@ class _BatchDialog:
                 if os.path.isfile(os.path.join(src, f))
                 and os.path.splitext(f)[1].lower() in IMAGE_EXTS
             )
-            for i in range(0, len(files) - 3, 4):
-                chunk = files[i:i+4]
-                if len(chunk) == 4:
-                    jobs.append((f"{os.path.basename(src)}_batch{i//4+1}", chunk))
+            for i in range(0, len(files) - need + 1, need):
+                jobs.append((f"{os.path.basename(src)}_batch{i//need+1}",
+                             files[i:i + need]))
         for name in sorted(os.listdir(src)):
             sub = os.path.join(src, name)
             if not os.path.isdir(sub):
                 continue
+            # папка результата внутри входной (по умолчанию так и есть) —
+            # не обрабатываем, иначе при втором запуске получатся «коллажи из коллажей»
+            if os.path.abspath(sub) == self.out_abs:
+                continue
             files = sorted(
                 os.path.join(sub, f) for f in os.listdir(sub)
-                if os.path.splitext(f)[1].lower() in IMAGE_EXTS
+                if os.path.isfile(os.path.join(sub, f))
+                and os.path.splitext(f)[1].lower() in IMAGE_EXTS
             )
-            if len(files) < 4:
-                self._log(f"· пропуск {name}: найдено {len(files)} фото")
+            if len(files) < need:
+                self._log(f"· пропуск {name}: найдено {len(files)} фото из {need}")
                 continue
-            jobs.append((name, files[:4]))
+            jobs.append((name, files[:need]))
         return jobs
 
     def _set_progress(self, done, total):
