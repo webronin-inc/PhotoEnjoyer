@@ -3,6 +3,8 @@ import tkinter as tk
 import math
 import random
 
+from . import anim
+
 
 # ==============================================================
 #  Скруглённый прямоугольник
@@ -237,10 +239,19 @@ class Tooltip:
             x = self.widget.winfo_rootx() - w - 8
         tip.wm_geometry(f"+{x}+{y - h // 2}")
         self._tip = tip
+        # плавное появление (если оконный менеджер поддерживает прозрачность)
+        try:
+            tip.attributes("-alpha", 0.0)
+            anim.get(tip).animate(
+                140, lambda t, w=tip: w.attributes("-alpha", t),
+                key=("tip", id(self)))
+        except Exception:
+            pass
 
     def _hide(self):
         if self._tip is not None:
             try:
+                anim.get(self.widget).cancel(("tip", id(self)))
                 self._tip.destroy()
             except Exception:
                 pass
@@ -313,8 +324,9 @@ class LogoMark(tk.Canvas):
 class RailButton(tk.Canvas):
     """Кнопка раздела в рельсе.
 
-    Если pulse=True — при активном состоянии вокруг кнопки
-    пульсирует неоновый ореол (для значка обновления и т.п.).
+    Наведение и активное состояние плавно анимируются. Если pulse=True —
+    у активной кнопки пульсирует ореол (значок обновления); таймер пульсации
+    работает ТОЛЬКО пока кнопка активна и видна на экране.
     """
 
     def __init__(self, master, palette, kind, size=42,
@@ -330,8 +342,9 @@ class RailButton(tk.Canvas):
         self._command = command
         self._hover = False
         self._active = False
+        self._hv = 0.0          # 0..1 — «насколько наведена»
+        self._av = 0.0          # 0..1 — «насколько активна»
 
-        # анимация
         self._pulse_allowed = bool(pulse)
         self._pulse_phase = 0.0
         self._pulse_job = None
@@ -342,11 +355,7 @@ class RailButton(tk.Canvas):
         self.bind("<Destroy>", self._on_destroy)
 
         self._redraw()
-
         self._tooltip = Tooltip(self, tooltip, palette) if tooltip else None
-
-        if self._pulse_allowed:
-            self._schedule_pulse()
 
     # ---------- tooltip ----------
     def set_tooltip(self, text):
@@ -357,47 +366,68 @@ class RailButton(tk.Canvas):
 
     # ---------- состояние ----------
     def set_active(self, active):
+        active = bool(active)
+        changed = active != self._active
         self._active = active
-        self._redraw()
+        if changed:
+            anim.tween_attr(self, "_av", 1.0 if active else 0.0,
+                            duration=260, easing=anim.ease_out_back
+                            if active else anim.ease_out_cubic)
+        else:
+            self._redraw()
+        if active and self._pulse_allowed:
+            self._start_pulse()
+        else:
+            self._stop_pulse()
 
     def _set_hover(self, h):
         self._hover = h
-        self._redraw()
+        anim.tween_attr(self, "_hv", 1.0 if h else 0.0, duration=140)
 
-    # ---------- анимация ----------
-    def _schedule_pulse(self):
-        if not self._pulse_allowed:
-            return
-        try:
-            self._pulse_job = self.after(50, self._pulse_tick)
-        except Exception:
+    # ---------- пульсация ----------
+    def _start_pulse(self):
+        if self._pulse_job is None:
+            try:
+                self._pulse_job = self.after(60, self._pulse_tick)
+            except Exception:
+                self._pulse_job = None
+
+    def _stop_pulse(self):
+        if self._pulse_job is not None:
+            try:
+                self.after_cancel(self._pulse_job)
+            except Exception:
+                pass
             self._pulse_job = None
 
     def _pulse_tick(self):
         self._pulse_job = None
-        if not self._pulse_allowed:
+        if not (self._pulse_allowed and self._active):
             return
         try:
             if not self.winfo_exists():
                 return
-            self._pulse_phase = (self._pulse_phase + 0.05) % 1.0
-            if self._active:
-                self._redraw()
+            if not self.winfo_ismapped():
+                # скрыта (pack_forget) — не жжём CPU; set_active(True)
+                # при следующем показе запустит пульсацию снова
+                return
+            self._pulse_phase = (self._pulse_phase + 0.04) % 1.0
+            self._redraw()
         except tk.TclError:
             return
         except Exception:
             pass
-        self._schedule_pulse()
+        self._start_pulse()
 
     def _on_destroy(self, event):
         if event.widget is self:
             self._pulse_allowed = False
-            if self._pulse_job is not None:
-                try:
-                    self.after_cancel(self._pulse_job)
-                except Exception:
-                    pass
-                self._pulse_job = None
+            self._stop_pulse()
+            try:
+                anim.get(self).cancel((id(self), "_hv"))
+                anim.get(self).cancel((id(self), "_av"))
+            except Exception:
+                pass
 
     # ---------- отрисовка ----------
     def _redraw(self):
@@ -405,36 +435,33 @@ class RailButton(tk.Canvas):
         p = self.palette
         s = self.size
         cx = s / 2
+        hv = max(0.0, min(1.0, self._hv))
+        av = max(0.0, min(1.5, self._av))
+        av1 = min(1.0, av)
 
-        if self._active:
-            # пульсирующий ореол внутри кнопки
-            if self._pulse_allowed:
-                pulse = abs(math.sin(self._pulse_phase * math.pi))
-                # 3 слоя обводки от внутреннего к внешнему
-                for i, (pad, base_alpha) in enumerate([
-                    (3, 0.35),
-                    (1, 0.55),
-                    (-1, 0.75),
-                ]):
-                    a = base_alpha * (0.5 + pulse * 0.5)
-                    col = _blend_hex(p["accent"], p["bg"], a)
-                    rounded_rect(self, pad, pad, s - pad, s - pad,
-                                 radius=11, fill="", outline=col, width=2)
+        if self._pulse_allowed and self._active:
+            pulse = 0.5 - 0.5 * math.cos(2 * math.pi * self._pulse_phase)
+            for pad, base_alpha in ((3, 0.35), (1, 0.55), (-1, 0.75)):
+                a = base_alpha * (0.4 + pulse * 0.6) * av1
+                col = _blend_hex(p["accent"], p["bg"], a)
+                rounded_rect(self, pad, pad, s - pad, s - pad,
+                             radius=11, fill="", outline=col, width=2)
 
-            # фон кнопки
+        glow = max(hv, av1)
+        if glow > 0.01:
+            fill = _blend_hex(p["surface_alt"], p["bg"], glow)
             rounded_rect(self, 4, 4, s - 4, s - 4, radius=11,
-                         fill=p["surface_alt"], outline="")
-            # акцентная полоска слева
-            rounded_rect(self, -8, s * 0.28, -4, s * 0.72, radius=2,
+                         fill=fill, outline="")
+
+        if av1 > 0.01:
+            # акцентная полоска у левого края (раньше рисовалась за границей
+            # холста и была невидима); «выезжает» по высоте
+            half = s * 0.22 * av
+            rounded_rect(self, 0, cx - half, 3, cx + half, radius=1,
                          fill=p["accent"], outline="")
-            color = p["accent_hi"]
-        elif self._hover:
-            rounded_rect(self, 4, 4, s - 4, s - 4, radius=11,
-                         fill=p["surface_alt"], outline="")
-            color = p["text"]
-        else:
-            color = p["text_dim"]
 
+        color = _blend_hex(p["accent_hi"], p["text_dim"], av1) if av1 > hv \
+            else _blend_hex(p["text"], p["text_dim"], hv)
         draw_icon(self, self.kind, cx, cx, size=22, color=color)
 
 
@@ -449,6 +476,8 @@ class GradientButton(tk.Canvas):
         self.icon = icon
         self._command = command
         self._hover = False
+        self._hv = 0.0
+        self._pressed = False
 
         import tkinter.font as tkfont
         try:
@@ -467,7 +496,8 @@ class GradientButton(tk.Canvas):
             bg=palette["surface"], highlightthickness=0,
             cursor="hand2", **kwargs,
         )
-        self.bind("<Button-1>", lambda e: self._invoke())
+        self.bind("<ButtonPress-1>", self._on_press)
+        self.bind("<ButtonRelease-1>", self._on_release)
         self.bind("<Enter>", lambda e: self._set_hover(True))
         self.bind("<Leave>", lambda e: self._set_hover(False))
         self._redraw()
@@ -476,9 +506,23 @@ class GradientButton(tk.Canvas):
         if self._command:
             self._command()
 
+    def _on_press(self, e):
+        self._pressed = True
+        self._redraw()
+
+    def _on_release(self, e):
+        was = self._pressed
+        self._pressed = False
+        self._redraw()
+        inside = 0 <= e.x <= self.winfo_width() and 0 <= e.y <= self.winfo_height()
+        if was and inside:
+            self._invoke()
+
     def _set_hover(self, h):
         self._hover = h
-        self._redraw()
+        if not h:
+            self._pressed = False
+        anim.tween_attr(self, "_hv", 1.0 if h else 0.0, duration=160)
 
     def _redraw(self):
         self.delete("all")
@@ -486,12 +530,13 @@ class GradientButton(tk.Canvas):
         h = int(self["height"])
         p = self.palette
 
-        color = p["accent_hi"] if self._hover else p["accent"]
-        rounded_rect(self, 0, 0, w, h, radius=12,
+        color = _blend_hex(p["accent_hi"], p["accent"], self._hv)
+        inset = 1 if self._pressed else 0       # лёгкое «нажатие»
+        rounded_rect(self, inset, inset, w - inset, h - inset, radius=12,
                      fill=color, outline="")
 
         cx = 18
-        cy = h / 2
+        cy = h / 2 + inset
         if self.icon:
             draw_icon(self, self.icon, cx + 9, cy, size=18, color="#ffffff")
             cx += 30
@@ -519,6 +564,9 @@ class GradientSlider(tk.Canvas):
         self._width = 100
         self._hover = False
         self._drag = False
+        self._hv = 0.0
+        self.on_press = None      # необязательные хуки жеста: перед первым
+        self.on_release = None    # изменением и после отпускания кнопки
 
         if step is None:
             self._step = max(1.0, (self.to - self.from_) / 100.0)
@@ -561,7 +609,7 @@ class GradientSlider(tk.Canvas):
 
     def _on_enter(self, event):
         self._hover = True
-        self._redraw()
+        anim.tween_attr(self, "_hv", 1.0, duration=130)
         self.bind_all("<MouseWheel>", self._on_wheel_global)
         self.bind_all("<Button-4>", lambda e: self._nudge(+1))
         self.bind_all("<Button-5>", lambda e: self._nudge(-1))
@@ -570,7 +618,7 @@ class GradientSlider(tk.Canvas):
         if self._drag:
             return
         self._hover = False
-        self._redraw()
+        anim.tween_attr(self, "_hv", 0.0, duration=130)
         self.unbind_all("<MouseWheel>")
         self.unbind_all("<Button-4>")
         self.unbind_all("<Button-5>")
@@ -588,6 +636,8 @@ class GradientSlider(tk.Canvas):
 
     def _on_press(self, e):
         self._drag = True
+        if self.on_press:
+            self.on_press()
         try:
             self.focus_set()
         except Exception:
@@ -599,6 +649,8 @@ class GradientSlider(tk.Canvas):
 
     def _on_release(self, e):
         self._drag = False
+        if self.on_release:
+            self.on_release()
 
     def _update_from_x(self, x):
         pad = 14
@@ -625,11 +677,11 @@ class GradientSlider(tk.Canvas):
             rounded_rect(self, pad, y - 2, progress_x, y + 2, radius=2,
                          fill=p["accent"], outline="")
 
-        r = 9 if self._hover else 8
+        r = 8 + self._hv + (1 if self._drag else 0)
         cx = progress_x
         self.create_oval(cx - r, y - r + 1, cx + r, y + r + 1,
                          fill=p["shadow"], outline="")
-        border_color = p["accent_hi"] if self._hover else p["accent"]
+        border_color = _blend_hex(p["accent_hi"], p["accent"], self._hv)
         self.create_oval(cx - r, y - r, cx + r, y + r,
                          fill="#ffffff", outline=border_color, width=2)
 
@@ -650,6 +702,7 @@ class IconButton(tk.Canvas):
         self.kind = kind
         self._command = command
         self._hover = False
+        self._hv = 0.0
 
         self.bind("<Button-1>", lambda e: command() if command else None)
         self.bind("<Enter>", lambda e: self._set_hover(True))
@@ -661,18 +714,19 @@ class IconButton(tk.Canvas):
 
     def _set_hover(self, h):
         self._hover = h
-        self._redraw()
+        anim.tween_attr(self, "_hv", 1.0 if h else 0.0, duration=140)
 
     def _redraw(self):
         self.delete("all")
         p = self.palette
         s = self.size
 
-        if self._hover:
+        if self._hv > 0.01:
             rounded_rect(self, 3, 3, s - 3, s - 3, radius=9,
-                         fill=p["surface_alt"], outline="")
+                         fill=_blend_hex(p["surface_alt"], p["bg"], self._hv),
+                         outline="")
 
-        color = p["text"] if self._hover else p["text_dim"]
+        color = _blend_hex(p["text"], p["text_dim"], self._hv)
         draw_icon(self, self.kind, s / 2, s / 2, size=18, color=color)
 
 
@@ -696,7 +750,11 @@ class Slot(tk.Canvas):
         self.state = "empty"
         self.hover = False
         self.selected = False
+        self.marked = False        # отмечен для массового удаления
         self.thumb = None
+        self._hv = 0.0             # плавное наведение 0..1
+        self._flash = 0.0          # вспышка при появлении фото 1→0
+        self._reveal = 1.0         # проявление миниатюры 0→1
 
         self.bind("<Button-1>", on_click)
         self.bind("<Button-3>", on_right_click)
@@ -707,54 +765,108 @@ class Slot(tk.Canvas):
 
     def _on_enter(self, _):
         self.hover = True
-        self._redraw()
+        anim.tween_attr(self, "_hv", 1.0, duration=140)
 
     def _on_leave(self, _):
         self.hover = False
-        self._redraw()
+        anim.tween_attr(self, "_hv", 0.0, duration=180)
 
-    def set_thumb(self, photo_image):
+    def set_thumb(self, photo_image, animate=False):
+        had = self.state == "filled"
         self.thumb = photo_image
         self.state = "filled" if photo_image else "empty"
+        if photo_image is not None and animate and not had:
+            self.play_reveal()
+        else:
+            self._redraw()
+
+    def play_reveal(self):
+        """Миниатюра проявляется, по рамке пробегает вспышка акцентного цвета."""
+        self._reveal = 0.0
+        self._flash = 1.0
+        a = anim.get(self)
+        a.animate(320, self._set_reveal, key=(id(self), "reveal"),
+                  easing=anim.ease_out_cubic)
+        a.animate(520, self._set_flash, key=(id(self), "flash"),
+                  easing=anim.linear)
+
+    def _set_reveal(self, t):
+        self._reveal = t
+        self._redraw()
+
+    def _set_flash(self, t):
+        self._flash = 1.0 - t
         self._redraw()
 
     def update_border(self, selected=False):
         self.selected = selected
         self._redraw()
 
+    def set_marked(self, marked):
+        marked = bool(marked)
+        if marked != self.marked:
+            self.marked = marked
+            self._redraw()
+
     def _redraw(self):
         self.delete("all")
         p = self.palette
         w, h = self.W, self.H
         r = self.RADIUS
+        hv = max(0.0, min(1.0, self._hv))
 
         if self.selected:
             bc, bw, bg = p["accent"], 2, p["accent_soft"]
-        elif self.hover:
-            bc, bw, bg = p["accent_hi"], 1, p["surface_hi"]
+        elif self.marked:
+            bc, bw = p["danger"], 2
+            bg = _blend_hex(p["danger"], p["slot_bg"], 0.10)
         else:
-            bc, bw, bg = p["slot_border"], 1, p["slot_bg"]
+            bc = _blend_hex(p["accent_hi"], p["slot_border"], hv)
+            bw = 1
+            bg = _blend_hex(p["surface_hi"], p["slot_bg"], hv)
+
+        if self._flash > 0.01 and not self.selected and not self.marked:
+            bc = _blend_hex(p["accent_hi"], bc, self._flash)
+            bw = 2
 
         rounded_rect(self, 1, 1, w - 1, h - 1, radius=r,
                      fill=bg, outline=bc, width=bw)
 
         if self.state == "filled" and self.thumb:
             self.create_image(w / 2, h / 2, image=self.thumb, anchor="center")
+            if self._reveal < 0.999:
+                # fade-in: «завеса» цвета слота с убывающей штриховкой
+                stip = ("gray75" if self._reveal < 0.25 else
+                        "gray50" if self._reveal < 0.55 else
+                        "gray25" if self._reveal < 0.85 else "gray12")
+                self.create_rectangle(3, 3, w - 3, h - 3, fill=bg,
+                                      outline="", stipple=stip)
         else:
             cx, cy = w / 2, h / 2
-            color = p["accent"] if self.hover else p["text_faint"]
+            color = _blend_hex(p["accent"], p["text_faint"], hv)
+            lift = 3 * hv                               # плюс «подпрыгивает»
             if _detect_icon_font():
-                self.create_text(cx, cy - 20, text=_ICON_CHARS["plus"],
+                self.create_text(cx, cy - 20 - lift, text=_ICON_CHARS["plus"],
                                  fill=color, font=(_ICON_FONT, 22))
             else:
                 ps = 22
-                self.create_line(cx - ps/2, cy - 22, cx + ps/2, cy - 22,
+                y0 = cy - 22 - lift
+                self.create_line(cx - ps/2, y0, cx + ps/2, y0,
                                  fill=color, width=2, capstyle="round")
-                self.create_line(cx, cy - 22 - ps/2, cx, cy - 22 + ps/2,
+                self.create_line(cx, y0 - ps/2, cx, y0 + ps/2,
                                  fill=color, width=2, capstyle="round")
-            tc = p["text"] if self.hover else p["text_dim"]
+            tc = _blend_hex(p["text"], p["text_dim"], hv)
             self.create_text(cx, cy + 30, text=f"Фото {self.index + 1}",
                              fill=tc, font=("Segoe UI", 10))
+
+        if self.marked:
+            # галочка-бейдж в правом верхнем углу
+            bx, by, br = w - 20, 20, 11
+            self.create_oval(bx - br, by - br, bx + br, by + br,
+                             fill=p["danger"], outline="")
+            self.create_line(bx - 5, by, bx - 1, by + 4, bx + 5, by - 4,
+                             fill="#ffffff", width=2, capstyle="round",
+                             joinstyle="round")
 
 
 # ==============================================================
@@ -773,6 +885,7 @@ class ColorSwatch(tk.Canvas):
         self.color = color
         self._command = command
         self._hover = False
+        self._hv = 0.0
 
         self.bind("<Button-1>", lambda e: command() if command else None)
         self.bind("<Enter>", lambda e: self._set_hover(True))
@@ -785,14 +898,14 @@ class ColorSwatch(tk.Canvas):
 
     def _set_hover(self, h):
         self._hover = h
-        self._redraw()
+        anim.tween_attr(self, "_hv", 1.0 if h else 0.0, duration=140)
 
     def _redraw(self):
         self.delete("all")
         p = self.palette
         s = self.size
-        border = p["accent"] if self._hover else p["border"]
-        bw = 2 if self._hover else 1
+        border = _blend_hex(p["accent"], p["border"], self._hv)
+        bw = 2 if self._hv > 0.5 else 1
         rounded_rect(self, 1, 1, s - 1, s - 1, radius=8,
                      fill="", outline=border, width=bw)
         pad = 5
@@ -878,29 +991,39 @@ def enable_mousewheel(canvas):
 #  Анимированный неоновый статус-бар
 # ==============================================================
 class _Particle:
-    __slots__ = ("x", "y", "vx", "vy", "size", "alpha", "life")
+    """Частица статус-бара.
 
-    def __init__(self, w, h):
-        self.x = random.uniform(0, w)
+    Раньше она возрождалась по истечении «жизни» (≈1–2 с) и успевала пролететь
+    максимум ~100 px, поэтому все частицы кучковались у левого края. Теперь
+    жизнь влияет только на мерцание, а возрождение — когда частица вылетела
+    за правый край.
+    """
+    __slots__ = ("x", "y", "vx", "vy", "size", "alpha", "phase")
+
+    def __init__(self, w, h, spread=True):
+        self._respawn(w, h, spread)
+
+    def _respawn(self, w, h, spread=False):
+        self.x = random.uniform(0, w) if spread else -4.0
         self.y = random.uniform(h * 0.2, h * 0.8)
         self.vx = random.uniform(0.4, 1.6)
-        self.vy = random.uniform(-0.15, 0.15)
+        self.vy = random.uniform(-0.12, 0.12)
         self.size = random.uniform(1.0, 2.2)
-        self.alpha = random.uniform(0.25, 0.7)
-        self.life = random.uniform(0.3, 1.0)
+        self.alpha = random.uniform(0.3, 0.7)
+        self.phase = random.random()
 
-    def step(self, w, h):
-        self.x += self.vx
-        self.y += self.vy
-        self.life -= 0.012
-        if self.x > w + 4 or self.life <= 0:
-            self.x = -4
-            self.y = random.uniform(h * 0.2, h * 0.8)
-            self.vx = random.uniform(0.4, 1.6)
-            self.vy = random.uniform(-0.15, 0.15)
-            self.size = random.uniform(1.0, 2.2)
-            self.alpha = random.uniform(0.25, 0.7)
-            self.life = random.uniform(0.3, 1.0)
+    def step(self, w, h, dt=1.0):
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+        self.phase = (self.phase + 0.02 * dt) % 1.0
+        if self.y < h * 0.15 or self.y > h * 0.85:
+            self.vy = -self.vy
+        if self.x > w + 4:
+            self._respawn(w, h)
+
+    @property
+    def twinkle(self):
+        return 0.6 + 0.4 * math.sin(self.phase * 2 * math.pi)
 
 
 class _PulseRing:
@@ -1028,6 +1151,11 @@ class AnimatedStatusBar(tk.Canvas):
                 self.stop()
                 return
 
+            if not self.winfo_ismapped():
+                # окно свёрнуто/раздел скрыт — анимацию не считаем
+                self._schedule_tick()
+                return
+
             self._phase = (self._phase + 0.035) % 1.0
             if self._state == "busy":
                 self._wave_pos = (self._wave_pos + 0.018) % 1.0
@@ -1098,7 +1226,7 @@ class AnimatedStatusBar(tk.Canvas):
         for pt in self._particles:
             if pt.x < -2 or pt.x > w + 2:
                 continue
-            alpha = pt.alpha * min(1.0, pt.life * 2)
+            alpha = pt.alpha * pt.twinkle
             if alpha <= 0.02:
                 continue
             color = _blend_hex(state_color, p["bg"], alpha * 0.85)

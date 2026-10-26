@@ -107,6 +107,16 @@ class SettingsDialog:
                  font=("Segoe UI", 8), anchor="w"
                  ).pack(fill=tk.X, padx=24, pady=(0, 8))
 
+        self.anim_var = tk.BooleanVar(value=bool(self.config.get("animations", True)))
+        ttk.Checkbutton(body, text="Анимации интерфейса",
+                        variable=self.anim_var).pack(
+            anchor="w", padx=24, pady=(0, 2))
+        tk.Label(body, text="Плавные переходы, появление фото, уведомления. "
+                            "Отключите на слабом компьютере.",
+                 bg=p["surface"], fg=p["text_faint"],
+                 font=("Segoe UI", 8), anchor="w"
+                 ).pack(fill=tk.X, padx=24, pady=(0, 8))
+
         # ============ ОБНОВЛЕНИЯ ============
         self._divider(body)
         self._section(body, "Обновления")
@@ -340,6 +350,9 @@ class SettingsDialog:
         u = self.config.data.setdefault("updates", {})
         u["auto_check"] = bool(self.auto_check_var.get())
         u["auto_install_plugins"] = bool(self.auto_plugins_var.get())
+        self.config["animations"] = bool(self.anim_var.get())
+        from .. import anim
+        anim.set_enabled(self.config["animations"])
         self.config.save()
 
     def _save(self):

@@ -13,6 +13,7 @@ DEFAULTS = {
     "bg_color": "#ffffff",
     "quality": 92,
     "theme": "dark",                # dark | light
+    "animations": True,             # анимации интерфейса
 }
 
 LAYOUTS = {
@@ -67,9 +68,16 @@ class Config:
         for k, v in saved.items():
             if k in DEFAULTS:
                 # тип значения должен совпадать с типом по умолчанию
-                if isinstance(v, type(DEFAULTS[k])) and not isinstance(v, bool):
+                # (bool — подкласс int, поэтому сравниваем его отдельно)
+                d = DEFAULTS[k]
+                if isinstance(d, bool):
+                    if isinstance(v, bool):
+                        self.data[k] = v
+                elif isinstance(v, bool):
+                    continue
+                elif isinstance(v, type(d)):
                     self.data[k] = v
-                elif isinstance(DEFAULTS[k], float) and isinstance(v, int):
+                elif isinstance(d, float) and isinstance(v, int):
                     self.data[k] = v
             else:
                 self.data[k] = v

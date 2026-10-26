@@ -24,21 +24,47 @@ def register(app):
         print("ℹ drag_drop: root не поддерживает DnD (нужен TkinterDnD.Tk)")
         return
 
-    for idx, container in enumerate(app.slot_containers):
-        targets = [container]
-        if hasattr(container, "winfo_children"):
-            targets.extend(container.winfo_children())
-
-        for widget in targets:
-            try:
-                widget.drop_target_register(DND_FILES)
-                widget.dnd_bind("<<Drop>>",      _wrap(_on_drop,      app, idx))
-                widget.dnd_bind("<<DropEnter>>", _wrap(_on_enter,     app, idx))
-                widget.dnd_bind("<<DropLeave>>", _wrap(_on_leave,     app, idx))
-            except tk.TclError:
-                pass
-
+    # Слоты — это новые виджеты после каждой смены шаблона/раскладки, undo,
+    # очистки и смены темы. Поэтому приёмники вешаются заново при КАЖДОЙ
+    # пересборке слотов (раньше — один раз при запуске, и после смены
+    # шаблона перетаскивание фото переставало работать).
+    app.add_slots_rebuilt_hook(lambda: _register_targets(app), call_now=True)
     app.plugin_flags["drag_drop"] = True
+
+
+def _register_targets(app):
+    for idx, container in enumerate(getattr(app, "slot_containers", [])):
+        for widget in _walk(container):
+            _bind(widget, app, idx)
+
+    # Весь список слотов (промежутки, поля подписей): файлы кладутся с первого
+    # пустого слота, чтобы промахнуться мимо квадрата было нельзя.
+    grid = getattr(app, "slots_grid", None)
+    if grid is not None:
+        for widget in _walk(grid):
+            if not getattr(widget, "_pe_dnd", False):
+                _bind(widget, app, None)
+
+
+def _walk(widget):
+    yield widget
+    try:
+        children = widget.winfo_children()
+    except Exception:
+        children = []
+    for ch in children:
+        yield from _walk(ch)
+
+
+def _bind(widget, app, idx):
+    try:
+        widget.drop_target_register(DND_FILES)
+        widget.dnd_bind("<<Drop>>",      _wrap(_on_drop,  app, idx))
+        widget.dnd_bind("<<DropEnter>>", _wrap(_on_enter, app, idx))
+        widget.dnd_bind("<<DropLeave>>", _wrap(_on_leave, app, idx))
+        widget._pe_dnd = idx is not None
+    except Exception:
+        pass
 
 
 def _wrap(fn, app, idx):
@@ -47,17 +73,23 @@ def _wrap(fn, app, idx):
 
 
 def _on_enter(app, _event, idx):
+    if idx is None:
+        return
     # подсветка через штатную отрисовку слота (раньше менялся bg Canvas,
     # и после перетаскивания слот оставался с «чужим» фоном)
     if idx < len(app.slot_containers):
         slot = app.slot_containers[idx]
         slot.hover = True
+        slot._hv = 1.0
         slot._redraw()
 
 
 def _on_leave(app, _event, idx):
+    if idx is None:
+        return
     if idx < len(app.slot_containers):
         app.slot_containers[idx].hover = False
+        app.slot_containers[idx]._hv = 0.0
     app.update_slot(idx)
 
 
@@ -88,4 +120,5 @@ def _on_drop(app, event, idx):
 
     placed = app.fill_slots(files, start=idx, undo_label="Перетаскивание фото")
     _on_leave(app, None, idx)
-    app.set_status(f"Перетащено файлов: {placed} → слот {idx + 1}")
+    where = f"слот {idx + 1}" if idx is not None else "свободные слоты"
+    app.set_status(f"Перетащено файлов: {placed} → {where}")

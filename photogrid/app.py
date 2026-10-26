@@ -1,9 +1,11 @@
 """Главный класс приложения PhotoGrid."""
 import os
+import queue
 import random
 import shutil
 import sys
 import tempfile
+import threading
 import uuid
 import tkinter as tk
 from tkinter import filedialog, messagebox, colorchooser
@@ -11,7 +13,8 @@ from tkinter import filedialog, messagebox, colorchooser
 from PIL import Image, ImageTk
 
 from .config import Config, LAYOUTS, IMAGE_EXTS, DEFAULTS
-from . import branding
+from . import anim, branding
+from .toast import ToastManager
 from .core import build_collage
 from .theme import apply_theme, DARK, LIGHT
 from .ui_widgets import (
@@ -65,6 +68,23 @@ class App:
         self.active_section = "collage"
         self.plugin_actions = {}
 
+        # --- API для плагинов и состояние массового выбора ---
+        self.slots_rebuilt_hooks = []   # вызываются после каждой пересборки слотов
+        self.slot_actions = []          # пункты контекстного меню слота от плагинов
+        self.marked = set()             # слоты, отмеченные для массового удаления
+        self._mark_anchor = None
+        self._drag_src = None           # перетаскивание фото между слотами
+        self._drag_active = False
+        self._drag_over = None
+        self._preview_pil = None        # то, что сейчас показано в превью
+        self._preview_seq = 0           # номер актуального запроса превью
+        self._saving = False
+        self._task_queue = queue.Queue()
+        self._task_poll = None
+        self._tasks_running = 0
+
+        anim.set_enabled(self.config["animations"])
+
         self.layout_var  = tk.StringVar(value=self.config["layout"])
         self.mode_var    = tk.StringVar(value=self.config["mode"])
         self.cell_var    = tk.IntVar(value=self.config["cell_size"])
@@ -72,6 +92,7 @@ class App:
         self.quality_var = tk.DoubleVar(value=self.config["quality"])
 
         self.ttk = apply_theme(self.root, self.config["theme"])
+        self.toasts = ToastManager(self.root, self.palette)
 
         self._build_layout()
         self._build_rail()
@@ -90,6 +111,25 @@ class App:
         self.update_status()
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self._fade_in_window()
+
+    def _fade_in_window(self):
+        """Плавное появление окна при запуске."""
+        if not anim.is_enabled():
+            return
+
+        def _set(a):
+            try:
+                self.root.attributes("-alpha", a)
+            except Exception:
+                pass
+
+        try:
+            self.root.attributes("-alpha", 0.0)
+        except Exception:
+            return
+        anim.get(self.root).animate(380, _set, on_done=lambda: _set(1.0),
+                                    key="startup-fade")
 
     # ==================================================================
     #  ИКОНКА ОКНА
@@ -224,6 +264,7 @@ class App:
                 )
                 return
 
+        prev = self.active_section
         for v in self.views.values():
             v.pack_forget()
 
@@ -231,10 +272,19 @@ class App:
         if target is not None:
             target.pack(fill=tk.BOTH, expand=True,
                         padx=(0, 14), pady=(14, 0))
+            if key != prev and getattr(self, "_plugins_loaded", False):
+                self._rise_in(target)
 
         for k, btn in self.rail_buttons.items():
             btn.set_active(k == key)
         self.active_section = key
+
+    def _rise_in(self, widget):
+        """Раздел «всплывает» снизу вверх за ~220 мс."""
+        def step(t):
+            widget.pack_configure(pady=(int(14 + 26 * (1 - t)), 0))
+        anim.get(self.root).animate(220, step, key="section-rise",
+                                    easing=anim.ease_out_cubic)
 
     def show_settings(self):
         from .screens.settings import open_settings_dialog
@@ -297,6 +347,22 @@ class App:
                  font=("Segoe UI", 8, "bold"),
                  anchor="w").pack(fill=tk.X, padx=20, pady=(14, 6))
 
+    def _small_button(self, parent, text, command, danger=False):
+        p = self.palette
+        accent = p["danger"] if danger else p["text"]
+        btn = tk.Button(parent, text=text, command=command,
+                        bg=p["surface_alt"], fg=accent,
+                        activebackground=p["surface_hi"],
+                        activeforeground=accent,
+                        disabledforeground=p["text_faint"],
+                        bd=0, relief="flat", cursor="hand2",
+                        highlightthickness=0,
+                        font=("Segoe UI", 9), padx=10, pady=5)
+        btn.bind("<Enter>", lambda e: btn.cget("state") == "normal"
+                 and btn.config(bg=p["surface_hi"]))
+        btn.bind("<Leave>", lambda e: btn.config(bg=p["surface_alt"]))
+        return btn
+
     def _section_divider(self, parent, p):
         wrap = tk.Frame(parent, bg=p["surface"])
         wrap.pack(fill=tk.X, padx=20, pady=(14, 0))
@@ -328,10 +394,23 @@ class App:
                  font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT)
 
         hint_text = ("Клик — выбрать / swap · Двойной — заменить\n"
+                     "Ctrl/Shift+клик — отметить · Del — удалить отмеченные\n"
                      "ПКМ — действия · перетащите файлы")
         tk.Label(left, text=hint_text, bg=p["surface"], fg=p["text_dim"],
                  font=("Segoe UI", 8), justify="left"
-                 ).pack(fill=tk.X, padx=18, pady=(0, 12))
+                 ).pack(fill=tk.X, padx=18, pady=(0, 8))
+
+        bulk = tk.Frame(left, bg=p["surface"])
+        bulk.pack(fill=tk.X, padx=18, pady=(0, 10))
+        self.mark_all_btn = self._small_button(
+            bulk, "Выбрать все", self.toggle_mark_all)
+        self.mark_all_btn.pack(side=tk.LEFT)
+        self.bulk_delete_btn = self._small_button(
+            bulk, "Удалить (0)", self.delete_marked, danger=True)
+        self.bulk_delete_btn.pack(side=tk.LEFT, padx=(6, 0))
+        self.clear_all_btn = self._small_button(
+            bulk, "Очистить всё", self.clear_all)
+        self.clear_all_btn.pack(side=tk.RIGHT)
 
         self.slots_grid = tk.Frame(left, bg=p["surface"])
         self.slots_grid.pack(padx=18, pady=(0, 18))
@@ -517,6 +596,9 @@ class App:
         # выделенный слот мог остаться за пределами новой раскладки
         if self.selected_slot is not None and self.selected_slot >= total:
             self.selected_slot = None
+        self.marked = {i for i in self.marked if i < total}
+        if self._mark_anchor is not None and self._mark_anchor >= total:
+            self._mark_anchor = None
 
         # Синхронизируем список подписей под новое количество слотов
         if len(self.captions) < total:
@@ -531,11 +613,17 @@ class App:
 
             slot = Slot(
                 self.slots_grid, p, i,
-                on_click=lambda e, idx=i: self.on_slot_click(idx),
+                on_click=lambda e, idx=i: self.on_slot_click(idx, e),
                 on_right_click=lambda e, idx=i: self.on_slot_context_menu(e, idx),
                 on_double_click=lambda e, idx=i: self.on_slot_replace(idx),
             )
             slot.grid(row=r * 2, column=c, padx=6, pady=(6, 2))
+            slot.bind("<ButtonPress-1>",
+                      lambda e, idx=i: self._drag_start(idx, e), add="+")
+            slot.bind("<B1-Motion>",
+                      lambda e, idx=i: self._drag_move(idx, e), add="+")
+            slot.bind("<ButtonRelease-1>",
+                      lambda e, idx=i: self._drag_end(idx, e), add="+")
             self.slot_widgets.append(slot)
 
             # --- поле для подписи под слотом ---
@@ -566,7 +654,17 @@ class App:
 
         for i in range(total):
             self.update_slot(i)
-    
+
+        # Слоты — новые виджеты: всё, что было навешено на старые (например,
+        # приёмники drag & drop), нужно навесить заново. Раньше это делалось
+        # один раз при загрузке плагинов, поэтому после смены шаблона
+        # перетаскивание фото в слоты переставало работать.
+        for hook in list(self.slots_rebuilt_hooks):
+            try:
+                hook()
+            except Exception as e:
+                print(f"slots_rebuilt hook error: {e}")
+
     def _on_caption_var_change(self, idx, var):
         """Реагирует на ввод в поле подписи слота."""
         text = var.get()
@@ -592,19 +690,20 @@ class App:
     # ==================================================================
     #  СЛОТЫ: содержимое
     # ==================================================================
-    def update_slot(self, idx):
+    def update_slot(self, idx, animate=False):
         if idx >= len(self.slot_widgets):
             return
         slot = self.slot_widgets[idx]
         path = self.photos[idx] if idx < len(self.photos) else None
         if path is None:
+            self.marked.discard(idx)
             slot.set_thumb(None)
             if idx < len(self.thumb_refs):
                 self.thumb_refs[idx] = None
         else:
             try:
                 thumb = self._make_thumb(path, 145)
-                slot.set_thumb(thumb)
+                slot.set_thumb(thumb, animate=animate)
                 if idx < len(self.thumb_refs):
                     self.thumb_refs[idx] = thumb
             except Exception as e:
@@ -612,6 +711,7 @@ class App:
                 slot.set_thumb(None)
                 if idx < len(self.thumb_refs):
                     self.thumb_refs[idx] = None
+        slot.set_marked(idx in self.marked)
         slot.update_border(selected=(self.selected_slot == idx))
 
     def _make_thumb(self, path, size):
@@ -625,7 +725,17 @@ class App:
     # ==================================================================
     #  КЛИКИ
     # ==================================================================
-    def on_slot_click(self, idx):
+    def on_slot_click(self, idx, event=None):
+        state = getattr(event, "state", 0) or 0
+        if not isinstance(state, int):
+            state = 0
+        ctrl, shift = bool(state & 0x4), bool(state & 0x1)
+        # Ctrl/Shift+клик — отметка для массового удаления; пока что-то
+        # отмечено, обычный клик по фото тоже отмечает (а не меняет местами)
+        if self.photos[idx] is not None and (ctrl or shift or self.marked):
+            self._mark_click(idx, shift)
+            return
+
         if self.photos[idx] is None:
             path = filedialog.askopenfilename(
                 title=f"Выберите фото {idx + 1}",
@@ -635,7 +745,7 @@ class App:
             if path:
                 self._push_undo("Выбор фото")
                 self.photos[idx] = path
-                self.update_slot(idx)
+                self.update_slot(idx, animate=True)
                 self.schedule_preview()
                 self.update_status()
             return
@@ -651,9 +761,163 @@ class App:
             self._push_undo("Обмен фото")
             self.photos[a], self.photos[b] = self.photos[b], self.photos[a]
             self.selected_slot = None
-            self.update_slot(a)
-            self.update_slot(b)
+            self.update_slot(a, animate=True)
+            self.update_slot(b, animate=True)
             self.schedule_preview()
+
+    # ------------------------------------------------------------------
+    #  ПЕРЕТАСКИВАНИЕ ФОТО МЕЖДУ СЛОТАМИ (мышью)
+    # ------------------------------------------------------------------
+    def _slot_under_pointer(self, event):
+        try:
+            w = self.root.winfo_containing(event.x_root, event.y_root)
+        except Exception:
+            return None
+        return w.index if isinstance(w, Slot) else None
+
+    def _set_drag_over(self, idx):
+        if idx == self._drag_over:
+            return
+        for i in (self._drag_over, idx):
+            if i is not None and i < len(self.slot_widgets):
+                w = self.slot_widgets[i]
+                on = (i == idx)
+                w.hover = on
+                w._hv = 1.0 if on else 0.0
+                w._redraw()
+        self._drag_over = idx
+
+    def _drag_start(self, idx, event):
+        self._drag_src = (idx, event.x_root, event.y_root)
+        self._drag_active = False
+
+    def _drag_move(self, idx, event):
+        src = self._drag_src
+        if not src or src[0] != idx or self.photos[idx] is None:
+            return
+        if not self._drag_active:
+            if abs(event.x_root - src[1]) + abs(event.y_root - src[2]) < 10:
+                return
+            self._drag_active = True
+            try:
+                self.slot_widgets[idx].config(cursor="fleur")
+            except Exception:
+                pass
+        t = self._slot_under_pointer(event)
+        self._set_drag_over(t if t != idx else None)
+
+    def _drag_end(self, idx, event):
+        src, active = self._drag_src, self._drag_active
+        self._drag_src, self._drag_active = None, False
+        if not (src and active) or src[0] != idx:
+            return
+        try:
+            self.slot_widgets[idx].config(cursor="hand2")
+        except Exception:
+            pass
+        self._set_drag_over(None)
+        target = self._slot_under_pointer(event)
+        if target is None or target == idx or target >= len(self.photos):
+            self._deselect()
+            return
+        self._push_undo("Перенос фото")
+        self.photos[idx], self.photos[target] = self.photos[target], self.photos[idx]
+        self.selected_slot = None
+        self.update_slot(idx, animate=True)
+        self.update_slot(target, animate=True)
+        self.schedule_preview()
+
+    # ------------------------------------------------------------------
+    #  МАССОВЫЙ ВЫБОР / УДАЛЕНИЕ
+    # ------------------------------------------------------------------
+    def _filled_indices(self):
+        return [i for i, p in enumerate(self.photos) if p is not None]
+
+    def _mark_click(self, idx, shift=False):
+        self._deselect()
+        if shift and self._mark_anchor is not None:
+            lo, hi = sorted((self._mark_anchor, idx))
+            for i in range(lo, hi + 1):
+                if self.photos[i] is not None:
+                    self.marked.add(i)
+        else:
+            if idx in self.marked:
+                self.marked.discard(idx)
+            else:
+                self.marked.add(idx)
+            self._mark_anchor = idx
+        self._refresh_marks()
+
+    def _refresh_marks(self):
+        for i, w in enumerate(self.slot_widgets):
+            w.set_marked(i in self.marked)
+        self.update_status()
+
+    def toggle_mark_all(self):
+        filled = set(self._filled_indices())
+        if not filled:
+            return
+        self._deselect()
+        if self.marked >= filled:
+            self.marked.clear()
+        else:
+            self.marked = set(filled)
+        self._refresh_marks()
+
+    def clear_marks(self):
+        if self.marked:
+            self.marked.clear()
+            self._mark_anchor = None
+            self._refresh_marks()
+
+    def delete_marked(self):
+        """Убирает все отмеченные фото разом (Ctrl+Z возвращает)."""
+        targets = sorted(i for i in self.marked
+                         if i < len(self.photos) and self.photos[i] is not None)
+        if not targets:
+            self.set_status("Нет отмеченных фото")
+            return 0
+        self._push_undo("Массовое удаление")
+        for i in targets:
+            self.photos[i] = None
+        self.marked.clear()
+        self._mark_anchor = None
+        self.selected_slot = None
+        for i in range(len(self.photos)):
+            self.update_slot(i)
+        self.schedule_preview()
+        self.update_status()
+        self.toasts.show(f"Убрано фото: {len(targets)}", kind="info",
+                         action=("Вернуть", self.undo))
+        return len(targets)
+
+    def _focus_in_text(self):
+        try:
+            w = self.root.focus_get()
+            return w is not None and w.winfo_class() in (
+                "Entry", "TEntry", "Text", "TCombobox", "Spinbox", "TSpinbox")
+        except Exception:
+            return False
+
+    def _on_delete_key(self):
+        if self._focus_in_text():
+            return
+        if self.marked:
+            self.delete_marked()
+        elif self.selected_slot is not None:
+            self.on_slot_clear(self.selected_slot)
+
+    def _on_select_all_key(self):
+        if self._focus_in_text():
+            return
+        self.toggle_mark_all()
+        return "break"
+
+    def _on_escape(self):
+        if self.marked:
+            self.clear_marks()
+        else:
+            self._deselect()
 
     def on_slot_context_menu(self, event, idx):
         p = self.palette
@@ -690,6 +954,24 @@ class App:
                          command=lambda: self.copy_slot_path(idx),
                          state=state)
 
+        menu.add_separator()
+        menu.add_command(
+            label=("Снять отметку" if idx in self.marked
+                   else "Отметить для удаления"),
+            command=lambda: self._mark_click(idx), state=state)
+        if self.marked:
+            menu.add_command(label=f"Удалить отмеченные ({len(self.marked)})",
+                             command=self.delete_marked)
+
+        extra = [a for a in self.slot_actions
+                 if has_photo or not a.get("needs_photo", True)]
+        if extra:
+            menu.add_separator()
+            for act in extra:
+                menu.add_command(
+                    label=act["label"],
+                    command=lambda a=act: a["command"](idx))
+
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -704,6 +986,8 @@ class App:
             self.update_slot(idx)
             self.schedule_preview()
             self.update_status()
+            self.toasts.show("Фото убрано", kind="info",
+                             action=("Вернуть", self.undo), duration=3000)
 
     def on_slot_replace(self, idx):
         path = filedialog.askopenfilename(
@@ -716,7 +1000,7 @@ class App:
             self.photos[idx] = path
             if self.selected_slot == idx:
                 self.selected_slot = None
-            self.update_slot(idx)
+            self.update_slot(idx, animate=True)
             self.schedule_preview()
             self.update_status()
 
@@ -755,7 +1039,7 @@ class App:
             fn(img).save(out, "PNG")
             self._push_undo(undo_label)
             self.photos[idx] = out
-            self.update_slot(idx)
+            self.update_slot(idx, animate=True)
             self.schedule_preview()
             self.set_status(status_text)
         except Exception as e:
@@ -776,7 +1060,9 @@ class App:
             "Не удалось отразить")
 
     def reveal_in_explorer(self, idx):
-        path = self.photos[idx]
+        self.reveal_path(self.photos[idx])
+
+    def reveal_path(self, path):
         if not path:
             return
         try:
@@ -892,6 +1178,8 @@ class App:
         self.update_status()
 
     def _apply_state(self, state):
+        self.marked.clear()
+        self._mark_anchor = None
         self.photos = list(state["photos"])
         self.captions = list(state.get("captions", [""] * len(self.photos)))
         for k, v in state["config"].items():
@@ -917,7 +1205,7 @@ class App:
         paths = list(paths)[:len(self.photos)]
         for i in range(len(self.photos)):
             self.photos[i] = paths[i] if i < len(paths) else None
-            self.update_slot(i)
+            self.update_slot(i, animate=True)
         self.selected_slot = None
         self.schedule_preview()
         self.update_status()
@@ -943,7 +1231,7 @@ class App:
         for k, path in enumerate(files):
             idx = (start + k) % n
             self.photos[idx] = path
-            self.update_slot(idx)
+            self.update_slot(idx, animate=True)
         self.selected_slot = None
         self.schedule_preview()
         self.update_status()
@@ -974,7 +1262,7 @@ class App:
         self._push_undo("Загрузка папки")
         for i in range(need):
             self.photos[i] = os.path.join(folder, files[i]) if i < len(files) else None
-            self.update_slot(i)
+            self.update_slot(i, animate=True)
         self.selected_slot = None
         self.schedule_preview()
         self.update_status()
@@ -982,19 +1270,19 @@ class App:
     def clear_all(self):
         if not any(self.photos):
             return
-        if not messagebox.askyesno("Подтверждение", "Очистить все выбранные фото?"):
-            return
+        # подтверждение больше не нужно: действие отменяется (Ctrl+Z / «Вернуть»)
         self._push_undo("Очистка")
         self.photos = [None] * len(self.photos)
         self.captions = [""] * len(self.photos)
-        # Обновляем визуальное содержимое всех слотов и подписей
-        for w in self.slots_grid.winfo_children():
-            w.destroy()
-        self.slot_widgets = []
-        self._build_slots()
+        self.marked.clear()
+        self._mark_anchor = None
         self.selected_slot = None
+        # слоты пересобираются (заодно очищаются поля подписей)
+        self._build_slots()
         self.schedule_preview()
         self.update_status()
+        self.toasts.show("Все фото убраны", kind="info",
+                         action=("Вернуть", self.undo))
 
     def shuffle_photos(self):
         self._push_undo("Перемешивание")
@@ -1013,6 +1301,7 @@ class App:
         for k, v in DEFAULTS.items():
             if k != "theme":
                 self.config[k] = v
+        anim.set_enabled(self.config["animations"])
         self._sync_vars_from_config()
 
     def toggle_theme(self):
@@ -1025,6 +1314,13 @@ class App:
         saved_captions = list(self.captions)
         saved_selected = self.selected_slot
         saved_last_save = self.last_save_path
+
+        # старые виджеты исчезнут — их анимации и хуки больше не нужны
+        anim.get(self.root).stop_all()
+        self.slots_rebuilt_hooks.clear()
+        self.slot_actions.clear()
+        self._preview_seq += 1
+        self._preview_pil = None
 
         try:
             if hasattr(self, "status_bar"):
@@ -1048,6 +1344,7 @@ class App:
 
         self.palette = DARK if self.config["theme"] == "dark" else LIGHT
         self.ttk = apply_theme(self.root, self.config["theme"])
+        self.toasts = ToastManager(self.root, self.palette)
 
         self.rail_buttons = {}
         self.views = {}
@@ -1149,35 +1446,148 @@ class App:
             self.root.after_cancel(self._preview_job)
         self._preview_job = self.root.after(250, self.update_preview)
 
-    def update_preview(self):
-        self._preview_job = None
+    def _show_placeholder(self, text=None, error=False):
         p = self.palette
+        self.preview_label.config(
+            image="",
+            text=text or "Здесь появится коллаж\n\nВыберите фото\nили перетащите их в слоты",
+            bg=p["bg"])
+        self.preview_ref = None
+        self._preview_pil = None
+
+    def _set_preview_image(self, img):
+        self.preview_ref = ImageTk.PhotoImage(img)
+        self.preview_label.config(image=self.preview_ref, text="",
+                                  bg=self.palette["bg"])
+
+    def _show_preview(self, img):
+        """Показывает превью; новое изображение плавно проявляется поверх старого."""
+        old = self._preview_pil
+        self._preview_pil = img
+        if not anim.is_enabled():
+            self._set_preview_image(img)
+            return
+
+        bg = self.palette["bg"]
+        w = max(img.width, old.width if old else 0)
+        h = max(img.height, old.height if old else 0)
+
+        def frame(im):
+            c = Image.new("RGB", (w, h), bg)
+            if im is not None:
+                c.paste(im.convert("RGB"),
+                        ((w - im.width) // 2, (h - im.height) // 2))
+            return c
+
+        a, b = frame(old), frame(img)
+
+        def step(t):
+            if self._preview_pil is not img:
+                return
+            self._set_preview_image(img if t >= 1.0 else Image.blend(a, b, t))
+
+        anim.get(self.root).animate(240, step, key="preview-fade",
+                                    easing=anim.ease_out_cubic)
+
+    def update_preview(self, sync=False):
+        """Пересобирает превью. Тяжёлая часть (загрузка и склейка фото) идёт
+        в фоновом потоке, поэтому окно и анимации не замирают; устаревшие
+        результаты отбрасываются по номеру запроса. sync=True — всё сразу."""
+        self._preview_job = None
+        self._preview_seq += 1
+        seq = self._preview_seq
+
         if not any(self.photos):
-            self.preview_label.config(
-                image="",
-                text="Здесь появится коллаж\n\nВыберите фото\nили перетащите их в слоты",
-                bg=p["bg"],
-            )
-            self.preview_ref = None
+            self._show_placeholder()
             if hasattr(self, "status_bar"):
                 self.status_bar.set_progress(None)
             return
-        try:
-            if hasattr(self, "status_bar"):
-                self.status_bar.set_progress(0.5)
-                self.root.update_idletasks()
-            img = build_collage(self.photos, self.config, for_preview=True,
-                                captions=self.captions)
-            img = self.apply_collage_hooks(img, for_preview=True)
-            img.thumbnail((620, 620), Image.LANCZOS)
-            self.preview_ref = ImageTk.PhotoImage(img)
-            self.preview_label.config(image=self.preview_ref, text="", bg=p["bg"])
-            if hasattr(self, "status_bar"):
-                self.status_bar.set_progress(None)
-        except Exception as e:
-            self.preview_label.config(image="", text=f"Ошибка:\n{e}", bg=p["bg"])
+
+        photos = list(self.photos)
+        captions = list(self.captions)
+        cfg = dict(self.config.data)
+
+        def work():
+            return build_collage(photos, cfg, for_preview=True,
+                                 captions=captions)
+
+        def finish():
             if hasattr(self, "status_bar"):
                 self.status_bar.set_progress(None)
+
+        def done(img):
+            if seq != self._preview_seq:
+                return
+            try:
+                img = self.apply_collage_hooks(img, for_preview=True)
+                img.thumbnail((620, 620), Image.LANCZOS)
+                self._show_preview(img)
+            except Exception as e:
+                self._show_placeholder(f"Ошибка:\n{e}")
+            finish()
+
+        def fail(e):
+            if seq != self._preview_seq:
+                return
+            self._show_placeholder(f"Ошибка:\n{e}")
+            finish()
+
+        if hasattr(self, "status_bar"):
+            self.status_bar.set_progress(0.5)
+
+        if sync:
+            try:
+                done(work())
+            except Exception as e:
+                fail(e)
+        else:
+            self.run_task(work, done, fail)
+
+    # ------------------------------------------------------------------
+    #  ФОНОВЫЕ ЗАДАЧИ
+    # ------------------------------------------------------------------
+    def run_task(self, work, on_done=None, on_error=None):
+        """Выполняет work() в потоке; on_done(результат) / on_error(исключение)
+        вызываются в главном потоке (через очередь — вызывать Tk из чужого
+        потока нельзя)."""
+        self._tasks_running += 1
+
+        def runner():
+            try:
+                res = work()
+            except BaseException as e:      # noqa: BLE001 — пробрасываем в UI
+                self._task_queue.put((on_error, e, True))
+                return
+            self._task_queue.put((on_done, res, False))
+
+        threading.Thread(target=runner, daemon=True).start()
+        self._ensure_task_poll()
+
+    def _ensure_task_poll(self):
+        if self._task_poll is None:
+            try:
+                self._task_poll = self.root.after(20, self._poll_tasks)
+            except Exception:
+                self._task_poll = None
+
+    def _poll_tasks(self):
+        self._task_poll = None
+        while True:
+            try:
+                cb, val, is_err = self._task_queue.get_nowait()
+            except queue.Empty:
+                break
+            self._tasks_running = max(0, self._tasks_running - 1)
+            if cb is None:
+                if is_err:
+                    print(f"[task] ошибка: {val!r}")
+                continue
+            try:
+                cb(val)
+            except Exception as e:
+                print(f"[task] ошибка обработчика: {e!r}")
+        if self._tasks_running > 0:
+            self._ensure_task_poll()
 
     # ==================================================================
     #  КОПИРОВАНИЕ В БУФЕР
@@ -1272,53 +1682,80 @@ class App:
                 return
             self.last_save_path = save_path
 
+        if self._saving:
+            self.set_status("Сохранение уже идёт…")
+            return
+        self._saving = True
         self.set_status("Сохранение…")
         if hasattr(self, "status_bar"):
             self.status_bar.set_progress(0.15)
-            self.root.update_idletasks()
-        try:
-            img = build_collage(self.photos, self.config, for_preview=False,
-                                captions=self.captions)
-            img = self.apply_collage_hooks(img, for_preview=False)
-            ext = os.path.splitext(save_path)[1].lower()
-            quality = int(self.config["quality"])
 
-            if ext in (".jpg", ".jpeg"):
-                img.save(save_path, "JPEG", quality=quality, optimize=True)
-            elif ext == ".png":
-                img.save(save_path, "PNG", optimize=True)
-            elif ext == ".webp":
-                img.save(save_path, "WEBP", quality=quality, method=6)
-            elif ext in (".tif", ".tiff"):
-                img.save(save_path, "TIFF", compression="tiff_lzw")
-            elif ext == ".bmp":
-                img.save(save_path, "BMP")
-            elif ext == ".pdf":
-                img.save(save_path, "PDF", resolution=150,
-                         title="Collage")
-            else:
-                # прочие расширения — Pillow сам разберётся
-                img.save(save_path)
+        photos = list(self.photos)
+        captions = list(self.captions)
+        cfg = dict(self.config.data)
+        quality = int(self.config["quality"])
 
-            if hasattr(self, "status_bar"):
-                self.status_bar.set_progress(1.0)
-                self.root.update_idletasks()
-
-            size_mb = os.path.getsize(save_path) / (1024 * 1024)
-            self.set_status(
-                f"Сохранено: {os.path.basename(save_path)}  ({img.width}×{img.height}, {size_mb:.2f} МБ)")
-            messagebox.showinfo(
-                "Готово!",
-                f"Файл сохранён:\n{save_path}\n\n"
-                f"Размер: {img.width}×{img.height}\nОбъём: {size_mb:.2f} МБ")
-
-            if hasattr(self, "status_bar"):
-                self.root.after(400, lambda: self.status_bar.set_progress(None))
-        except Exception as e:
+        def fail(e):
+            self._saving = False
             self.set_status("Ошибка сохранения")
             if hasattr(self, "status_bar"):
                 self.status_bar.set_progress(None)
             messagebox.showerror("Ошибка", f"Не удалось сохранить:\n{e}")
+
+        def built(img):
+            # хуки плагинов (водяной знак и т.п.) работают с Tk-данными,
+            # поэтому выполняются в главном потоке
+            try:
+                img = self.apply_collage_hooks(img, for_preview=False)
+            except Exception as e:
+                fail(e)
+                return
+            if hasattr(self, "status_bar"):
+                self.status_bar.set_progress(0.6)
+            self.run_task(lambda: (img, self._write_image(img, save_path, quality)),
+                          saved, fail)
+
+        def saved(res):
+            img, size_mb = res
+            self._saving = False
+            if hasattr(self, "status_bar"):
+                self.status_bar.set_progress(1.0)
+                self.root.after(500, lambda: self.status_bar.set_progress(None))
+            name = os.path.basename(save_path)
+            self.set_status(
+                f"Сохранено: {name}  ({img.width}×{img.height}, {size_mb:.2f} МБ)")
+            self.toasts.show(
+                f"Сохранено: {name}\n{img.width}×{img.height} · {size_mb:.2f} МБ",
+                kind="success", action=("Показать",
+                                        lambda: self.reveal_path(save_path)),
+                duration=6000)
+
+        self.run_task(
+            lambda: build_collage(photos, cfg, for_preview=False,
+                                  captions=captions),
+            built, fail)
+
+    @staticmethod
+    def _write_image(img, save_path, quality):
+        """Сохраняет картинку по расширению файла; возвращает размер в МБ."""
+        ext = os.path.splitext(save_path)[1].lower()
+        if ext in (".jpg", ".jpeg"):
+            img.convert("RGB").save(save_path, "JPEG", quality=quality,
+                                    optimize=True)
+        elif ext == ".png":
+            img.save(save_path, "PNG", optimize=True)
+        elif ext == ".webp":
+            img.save(save_path, "WEBP", quality=quality, method=6)
+        elif ext in (".tif", ".tiff"):
+            img.save(save_path, "TIFF", compression="tiff_lzw")
+        elif ext == ".bmp":
+            img.save(save_path, "BMP")
+        elif ext == ".pdf":
+            img.convert("RGB").save(save_path, "PDF", resolution=150,
+                                    title="Collage")
+        else:
+            img.save(save_path)
+        return os.path.getsize(save_path) / (1024 * 1024)
 
     # ==================================================================
     #  СТАТУС / СПРАВКА
@@ -1372,10 +1809,31 @@ class App:
         )
         self.status_bar.set_status(base, "ready")
 
-        self.status_bar.set_metrics([
+        metrics = []
+        if self.marked:
+            metrics.append(("отмечено", len(self.marked)))
+        metrics += [
             ("отмены", len(self._undo_stack)),
             ("плагины", len(self.plugin_flags)),
-        ])
+        ]
+        self.status_bar.set_metrics(metrics)
+
+        # кнопки массовых действий
+        n_marked = len(self.marked)
+        if hasattr(self, "bulk_delete_btn"):
+            try:
+                self.bulk_delete_btn.config(
+                    text=f"Удалить ({n_marked})",
+                    state="normal" if n_marked else "disabled")
+                filled = set(self._filled_indices())
+                all_marked = bool(filled) and self.marked >= filled
+                self.mark_all_btn.config(
+                    text="Снять все" if all_marked else "Выбрать все",
+                    state="normal" if filled else "disabled")
+                self.clear_all_btn.config(
+                    state="normal" if filled else "disabled")
+            except tk.TclError:
+                pass
 
     def show_hotkeys(self):
         messagebox.showinfo(
@@ -1388,10 +1846,14 @@ class App:
             "Ctrl+Y  — повторить\n"
             "Ctrl+,  — настройки\n"
             "F5      — обновить предпросмотр\n"
-            "Escape  — снять выделение слота\n\n"
+            "Escape  — снять отметки / выделение слота\n"
+            "Ctrl+A  — отметить все фото\n"
+            "Delete  — убрать отмеченные фото (или выделенное)\n"
+            "Ctrl+E  — редактор фото (выделенный слот)\n\n"
             "Мышь:\n"
             "Клик по пустому слоту   — выбрать файл\n"
             "Клик по двум слотам     — swap\n"
+            "Ctrl/Shift+клик         — отметить для удаления\n"
             "Двойной клик            — заменить фото\n"
             "ПКМ по слоту            — контекстное меню"
         )
@@ -1424,6 +1886,23 @@ class App:
         self.plugin_actions.setdefault(name, [])
         return None
 
+    def add_slot_action(self, label, command, needs_photo=True):
+        """Пункт контекстного меню слота. command(idx) вызывается с номером слота."""
+        for act in self.slot_actions:
+            if act["label"] == label:
+                act["command"] = command
+                return
+        self.slot_actions.append({"label": label, "command": command,
+                                  "needs_photo": needs_photo})
+
+    def add_slots_rebuilt_hook(self, fn, call_now=True):
+        """fn() вызывается после каждой пересборки слотов (смена шаблона,
+        undo, очистка…) и один раз сразу, если call_now."""
+        if fn not in self.slots_rebuilt_hooks:
+            self.slots_rebuilt_hooks.append(fn)
+        if call_now:
+            fn()
+
     def register_collage_hook(self, fn):
         self.collage_hooks.append(fn)
 
@@ -1445,7 +1924,10 @@ class App:
         self.root.bind("<Control-s>", lambda e: self.combine_and_save(force_dialog=False))
         self.root.bind("<Control-S>", lambda e: self.combine_and_save(force_dialog=True))
         self.root.bind("<F5>", lambda e: self.update_preview())
-        self.root.bind("<Escape>", lambda e: self._deselect())
+        self.root.bind("<Escape>", lambda e: self._on_escape())
+        self.root.bind("<Delete>", lambda e: self._on_delete_key())
+        self.root.bind("<Control-a>", lambda e: self._on_select_all_key())
+        self.root.bind("<Control-A>", lambda e: self._on_select_all_key())
         self.root.bind("<Control-Shift-C>", lambda e: self._copy_collage_shortcut())
         self.root.bind("<Control-comma>", lambda e: self.show_settings())
         self.root.bind("<Control-z>", lambda e: self.undo())

@@ -20,6 +20,7 @@ BUNDLED = [
     "watermark",
     "pdf_export",
     "crop_editor",
+    "photo_editor",
     "clipboard",
     "templates",
     "auto_updater",
