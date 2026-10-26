@@ -195,7 +195,12 @@ def tween_attr(widget, attr, target, duration=140, easing=ease_out_cubic,
     """Плавно меняет число widget.<attr> до target и вызывает redraw()."""
     start = float(getattr(widget, attr))
     redraw = redraw or getattr(widget, "_redraw", None)
+    key = (id(widget), attr)
     if abs(start - target) < 1e-3:
+        # Значение уже у цели, но может висеть ещё не начавшаяся анимация в
+        # обратную сторону (быстрое Enter→Leave до первого тика): без отмены
+        # она дойдёт до конца и подсветка «залипнет».
+        get(widget).cancel(key)
         setattr(widget, attr, float(target))
         return
 
@@ -204,8 +209,7 @@ def tween_attr(widget, attr, target, duration=140, easing=ease_out_cubic,
         if redraw:
             redraw()
 
-    get(widget).animate(duration, upd, easing=easing,
-                        key=(id(widget), attr))
+    get(widget).animate(duration, upd, easing=easing, key=key)
 
 
 def pulse_curve(t):
