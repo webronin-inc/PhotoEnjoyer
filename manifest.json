@@ -1,10 +1,10 @@
 {
-  "version": "0.0.0.14",
+  "version": "0.0.0.17",
   "release_date": "2026-10-26",
   "homepage": "https://github.com/webronin-inc/PhotoEnjoyer",
-  "download_url": "https://github.com/webronin-inc/PhotoEnjoyer/releases/download/v0.0.0.14/PhotoEnjoyer-Setup-0.0.0.14.exe",
-  "sha256": "5ff9e6909a4866f6e704b437dc0d5054ddaa9243aeb4bd48fd3cd86762658f5d",
+  "download_url": "https://github.com/webronin-inc/PhotoEnjoyer/releases/download/v0.0.0.17/PhotoEnjoyer-Setup-0.0.0.17.exe",
+  "sha256": "ec60dc4488f10f672486b6b3208623f3e7bfcd4da72fc71aac7b46539c29fd9b",
   "notes": "Обновление",
   "plugins": [],
-  "signature": "DXLgVZKtzrJeYF2/zzfdvQ/Zf0mwMsqKVfeO8PZEO0GvNkO0kaT6ausomeepSoIB6/iOOAkZ2eY023mut5eqAQ=="
+  "signature": "pZWozrR9OXmCe72PsF40F9XRzC9PNAX7L9zfWW4nJnc4/i6tiev0PZQTdu4h+Hs3B2x5QhKcQojsQDJxrByoAQ=="
 }
