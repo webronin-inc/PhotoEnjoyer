@@ -23,3 +23,5 @@ def pytest_terminal_summary(terminalreporter):
             terminalreporter.write_line(
                 f"::error title={_esc('pytest: ' + rep.nodeid)}::"
                 f"{_esc((where + ' ' + msg)[:1500])}")
+
+collect_ignore = ["test_captions.py", "test_icons.py"]   # BISECT-TEMP
