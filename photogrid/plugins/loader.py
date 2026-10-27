@@ -18,6 +18,7 @@ BUNDLED = [
     "drag_drop",
     "batch",
     "watermark",
+    "captions",
     "pdf_export",
     "crop_editor",
     "photo_editor",

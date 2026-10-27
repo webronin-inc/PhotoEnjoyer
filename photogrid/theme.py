@@ -196,6 +196,41 @@ def apply_theme(root, name="dark"):
     style.map("TSpinbox",
               fieldbackground=[("focus", palette["surface_hi"])])
 
+    # clam рисует рамку полей светлыми цветами по умолчанию (белая «окантовка»
+    # на тёмной теме) — задаём рамку и подсветку фокуса явно
+    for st in ("TEntry", "TCombobox", "TSpinbox"):
+        style.configure(st, bordercolor=palette["border"],
+                        lightcolor=palette["surface_alt"],
+                        darkcolor=palette["surface_alt"], borderwidth=1,
+                        insertcolor=palette["text"],
+                        selectbackground=palette["accent"],
+                        selectforeground="#ffffff")
+        style.map(st, bordercolor=[("focus", palette["accent"]),
+                                   ("hover", palette["text_faint"])],
+                  lightcolor=[("focus", palette["surface_hi"])],
+                  darkcolor=[("focus", palette["surface_hi"])])
+    for st in ("TSpinbox", "TCombobox"):
+        style.configure(st, arrowsize=12, arrowpadding=4)
+    style.map("TSpinbox", background=[("active", palette["surface_hi"])])
+    for st in ("TRadiobutton", "TCheckbutton"):
+        style.configure(st, indicatorbackground=palette["surface_alt"],
+                        indicatormargin=(0, 0, 6, 0),
+                        upperbordercolor=palette["text_faint"],
+                        lowerbordercolor=palette["text_faint"])
+        style.map(st, indicatorbackground=[("selected", palette["accent"]),
+                                           ("active", palette["surface_hi"])],
+                  indicatorcolor=[("selected", palette["accent"])],
+                  upperbordercolor=[("selected", palette["accent"])],
+                  lowerbordercolor=[("selected", palette["accent"])])
+
+    # выпадающий список Combobox — обычный tk.Listbox, красим через option db
+    for key, val in (("background", palette["surface_alt"]),
+                     ("foreground", palette["text"]),
+                     ("selectBackground", palette["accent"]),
+                     ("selectForeground", "#ffffff"),
+                     ("borderWidth", 0), ("relief", "flat")):
+        root.option_add(f"*TCombobox*Listbox.{key}", val)
+
     style.configure("TScale",
                     background=palette["surface"],
                     troughcolor=palette["surface_alt"],
