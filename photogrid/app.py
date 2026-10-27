@@ -13,12 +13,13 @@ from tkinter import filedialog, messagebox, colorchooser
 from PIL import Image, ImageTk
 
 from .config import Config, LAYOUTS, IMAGE_EXTS, DEFAULTS
-from . import anim, branding
+from . import anim, branding, icons
 from .toast import ToastManager
 from .core import build_collage
 from .theme import apply_theme, DARK, LIGHT
 from .ui_widgets import (
     HoverButton, Slot, LogoMark, IconButton, ColorSwatch,
+    SegmentedControl, CaptionEntry,
     RailButton, GradientButton, GradientSlider, Tooltip, style_dropdown,
     AnimatedStatusBar,
 )
@@ -392,6 +393,10 @@ class App:
         tk.Label(head, text="ФОТОГРАФИИ",
                  bg=p["surface"], fg=p["text_faint"],
                  font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT)
+        IconButton(head, p, kind="caption", size=30,
+                   command=self.open_captions_dialog,
+                   tooltip="Подписи: стиль, шрифт, быстрые действия"
+                   ).pack(side=tk.RIGHT)
 
         hint_text = ("Клик — выбрать / swap · Двойной — заменить\n"
                      "Ctrl/Shift+клик — отметить · Del — удалить отмеченные\n"
@@ -449,14 +454,10 @@ class App:
             row=0, column=1, sticky="ew", padx=(16, 0), pady=6)
 
         self._setting_label(sec1, "Режим", 1, p)
-        mode_frame = tk.Frame(sec1, bg=p["surface"])
-        mode_frame.grid(row=1, column=1, sticky="w", padx=(16, 0), pady=6)
-        ttk.Radiobutton(mode_frame, text="Вписать",
-                        variable=self.mode_var, value="fit"
-                        ).pack(side=tk.LEFT, padx=(0, 14))
-        ttk.Radiobutton(mode_frame, text="Заполнить",
-                        variable=self.mode_var, value="fill"
-                        ).pack(side=tk.LEFT)
+        SegmentedControl(
+            sec1, p, [("fit", "Вписать"), ("fill", "Заполнить")],
+            variable=self.mode_var,
+        ).grid(row=1, column=1, sticky="w", padx=(16, 0), pady=6)
 
         self._section_divider(mid, p)
 
@@ -532,22 +533,28 @@ class App:
             command=lambda: self.combine_and_save(force_dialog=True),
         ).pack(fill=tk.X, pady=(0, 8))
 
-        copy_btn = tk.Button(btnbox, text="  Копировать в буфер",
+        copy_btn = tk.Button(btnbox, text="Копировать в буфер",
+                             image=icons.tk_icon("copy", 18, p["text_dim"], 10),
+                             compound="left",
                              bg=p["surface_alt"], fg=p["text"],
                              activebackground=p["surface_hi"],
                              activeforeground=p["text"],
                              bd=0, relief="flat", cursor="hand2",
                              font=("Segoe UI", 10), anchor="w",
-                             padx=14, pady=10,
+                             highlightthickness=0, takefocus=0,
+                       padx=14, pady=10,
                              command=self.copy_collage_to_clipboard_with_ui)
         copy_btn.pack(fill=tk.X, pady=(0, 6))
 
-        b2 = tk.Button(btnbox, text="  Загрузить из папки",
+        b2 = tk.Button(btnbox, text="Загрузить из папки",
+                       image=icons.tk_icon("folder", 18, p["text_dim"], 10),
+                       compound="left",
                        bg=p["surface_alt"], fg=p["text"],
                        activebackground=p["surface_hi"],
                        activeforeground=p["text"],
                        bd=0, relief="flat", cursor="hand2",
                        font=("Segoe UI", 10), anchor="w",
+                       highlightthickness=0, takefocus=0,
                        padx=14, pady=11,
                        command=self.load_from_folder)
         b2.pack(fill=tk.X, pady=(0, 4))
@@ -628,15 +635,7 @@ class App:
 
             # --- поле для подписи под слотом ---
             cap_var = tk.StringVar(value=self.captions[i] if i < len(self.captions) else "")
-            entry = tk.Entry(
-                self.slots_grid,
-                textvariable=cap_var,
-                bg=p["slot_bg"], fg=p["text"],
-                insertbackground=p["text"],
-                bd=0, relief="flat",
-                font=("Segoe UI", 8),
-                justify="center",
-            )
+            entry = CaptionEntry(self.slots_grid, p, cap_var)
             entry.grid(row=r * 2 + 1, column=c,
                        padx=6, pady=(0, 8), sticky="ew")
 
@@ -664,6 +663,14 @@ class App:
                 hook()
             except Exception as e:
                 print(f"slots_rebuilt hook error: {e}")
+
+    def open_captions_dialog(self):
+        """Окно настроек подписей (плагин captions)."""
+        opener = getattr(self, "_captions_opener", None)
+        if opener:
+            opener()
+        else:
+            self.set_status("Плагин подписей не загружен")
 
     def _on_caption_var_change(self, idx, var):
         """Реагирует на ввод в поле подписи слота."""

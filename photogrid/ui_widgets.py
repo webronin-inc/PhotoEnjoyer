@@ -3,7 +3,7 @@ import tkinter as tk
 import math
 import random
 
-from . import anim
+from . import anim, icons
 
 
 # ==============================================================
@@ -46,134 +46,11 @@ def _blend_hex(c1, c2, alpha):
 
 
 # ==============================================================
-#  Иконочный шрифт
+#  Иконки (собственный векторный набор, см. icons.py)
 # ==============================================================
-_ICON_FONT = None
-_ICON_AVAILABLE = None
-
-
-def _detect_icon_font():
-    global _ICON_FONT, _ICON_AVAILABLE
-    if _ICON_AVAILABLE is not None:
-        return _ICON_AVAILABLE
-    try:
-        import tkinter.font as tkfont
-        root = tk._default_root
-        if root is None:
-            _ICON_AVAILABLE = False
-            return False
-        families = set(tkfont.families(root))
-        for name in ("Segoe MDL2 Assets", "Segoe Fluent Icons"):
-            if name in families:
-                _ICON_FONT = name
-                _ICON_AVAILABLE = True
-                return True
-        _ICON_AVAILABLE = False
-        return False
-    except Exception:
-        _ICON_AVAILABLE = False
-        return False
-
-
-_ICON_CHARS = {
-    "collage":   "\uE91B",
-    "plugins":   "\uE71D",
-    "batch":     "\uE8F1",
-    "cloud":     "\uE753",
-    "save":      "\uE74E",
-    "folder":    "\uE8B7",
-    "refresh":   "\uE72C",
-    "download":  "\uE896",
-    "upload":    "\uE898",
-    "check":     "\uE73E",
-    "plus":      "\uE710",
-    "delete":    "\uE74D",
-    "shuffle":   "\uE8B1",
-    "clear":     "\uE894",
-    "theme":     "\uE706",
-    "theme_alt": "\uE708",
-    "settings":  "\uE713",
-    "help":      "\uE897",
-    "bell":      "\uEA8F",
-    "info":      "\uE946",
-    "close":     "\uE711",
-    "menu":      "\uE700",
-    "layers":    "\uE81E",
-    "image":     "\uE91B",
-    "update":    "\uE895",
-}
-
-
 def draw_icon(canvas, kind, cx, cy, size=20, color="#ffffff"):
-    if _detect_icon_font():
-        char = _ICON_CHARS.get(kind)
-        if char:
-            font_size = int(size * 0.92)
-            canvas.create_text(cx, cy + 1, text=char, fill=color,
-                               font=(_ICON_FONT, font_size))
-            return
-    _draw_fallback_icon(canvas, kind, cx, cy, size, color)
-
-
-def _draw_fallback_icon(canvas, kind, cx, cy, size=20, color="#ffffff"):
-    s = size
-    LW = 1.7
-    CAP = "round"
-
-    if kind in ("collage", "image"):
-        q = s * 0.32
-        gap = s * 0.1
-        for dx, dy in [(-q - gap/2, -q - gap/2), (gap/2, -q - gap/2),
-                       (-q - gap/2, gap/2), (gap/2, gap/2)]:
-            canvas.create_rectangle(cx + dx, cy + dy,
-                                    cx + dx + q, cy + dy + q,
-                                    outline=color, width=LW)
-    elif kind in ("theme", "sun"):
-        r = s * 0.22
-        canvas.create_oval(cx - r, cy - r, cx + r, cy + r,
-                           outline=color, width=LW)
-        for i in range(8):
-            a = i * math.pi / 4
-            x1 = cx + (r + s * 0.06) * math.cos(a)
-            y1 = cy + (r + s * 0.06) * math.sin(a)
-            x2 = cx + (r + s * 0.18) * math.cos(a)
-            y2 = cy + (r + s * 0.18) * math.sin(a)
-            canvas.create_line(x1, y1, x2, y2, fill=color, width=LW, capstyle=CAP)
-    elif kind == "help":
-        r = s * 0.44
-        canvas.create_oval(cx - r, cy - r, cx + r, cy + r,
-                           outline=color, width=LW)
-        canvas.create_text(cx, cy + 1, text="?", fill=color,
-                           font=("Segoe UI", int(s * 0.55), "bold"))
-    elif kind == "settings":
-        r = s * 0.28
-        canvas.create_oval(cx - r, cy - r, cx + r, cy + r,
-                           outline=color, width=LW)
-        for i in range(8):
-            a = i * math.pi / 4
-            x1 = cx + r * math.cos(a)
-            y1 = cy + r * math.sin(a)
-            x2 = cx + (r + s * 0.18) * math.cos(a)
-            y2 = cy + (r + s * 0.18) * math.sin(a)
-            canvas.create_line(x1, y1, x2, y2, fill=color, width=LW, capstyle=CAP)
-    elif kind == "update":
-        # круговая стрелка
-        r = s * 0.36
-        canvas.create_arc(cx - r, cy - r, cx + r, cy + r,
-                          start=40, extent=280, style="arc",
-                          outline=color, width=LW)
-        ax = cx + r * math.cos(math.radians(40))
-        ay = cy - r * math.sin(math.radians(40))
-        canvas.create_line(ax - s*0.1, ay - s*0.05, ax, ay,
-                           fill=color, width=LW, capstyle=CAP)
-        canvas.create_line(ax, ay, ax + s*0.08, ay - s*0.1,
-                           fill=color, width=LW, capstyle=CAP)
-    else:
-        canvas.create_polygon(
-            cx, cy - s*0.35, cx + s*0.35, cy,
-            cx, cy + s*0.35, cx - s*0.35, cy,
-            fill="", outline=color, width=LW,
-        )
+    """Рисует иконку по центру (cx, cy); не зависит от системных шрифтов."""
+    return icons.draw(canvas, kind, cx, cy, size=size, color=color)
 
 
 # ==============================================================
@@ -500,6 +377,7 @@ class GradientButton(tk.Canvas):
         self.bind("<ButtonRelease-1>", self._on_release)
         self.bind("<Enter>", lambda e: self._set_hover(True))
         self.bind("<Leave>", lambda e: self._set_hover(False))
+        self.bind("<Configure>", lambda e: self._redraw())
         self._redraw()
 
     def _invoke(self):
@@ -526,7 +404,8 @@ class GradientButton(tk.Canvas):
 
     def _redraw(self):
         self.delete("all")
-        w = int(self["width"])
+        # при pack(fill=X) холст шире заданной ширины — рисуем по реальной
+        w = max(int(self["width"]), self.winfo_width())
         h = int(self["height"])
         p = self.palette
 
@@ -875,16 +754,7 @@ class Slot(tk.Canvas):
             cx, cy = w / 2, h / 2
             color = _blend_hex(p["accent"], p["text_faint"], hv)
             lift = 3 * hv                               # плюс «подпрыгивает»
-            if _detect_icon_font():
-                self.create_text(cx, cy - 20 - lift, text=_ICON_CHARS["plus"],
-                                 fill=color, font=(_ICON_FONT, 22))
-            else:
-                ps = 22
-                y0 = cy - 22 - lift
-                self.create_line(cx - ps/2, y0, cx + ps/2, y0,
-                                 fill=color, width=2, capstyle="round")
-                self.create_line(cx, y0 - ps/2, cx, y0 + ps/2,
-                                 fill=color, width=2, capstyle="round")
+            draw_icon(self, "plus", cx, cy - 22 - lift, size=26, color=color)
             tc = _blend_hex(p["text"], p["text_dim"], hv)
             self.create_text(cx, cy + 30, text=f"Фото {self.index + 1}",
                              fill=tc, font=("Segoe UI", 10))
@@ -1392,3 +1262,217 @@ class AnimatedStatusBar(tk.Canvas):
                 )
                 label_w = len(label) * 6 + 8
                 x -= (value_w + label_w + 22)
+
+# ==============================================================
+#  SegmentedControl — переключатель «один из N» (вместо радиокнопок)
+# ==============================================================
+class SegmentedControl(tk.Frame):
+    """Сегментированный переключатель.
+
+    options — список (значение, подпись) или (значение, подпись, иконка).
+    Можно связать с tk.StringVar (variable) — тогда он синхронизируется в
+    обе стороны, в том числе при изменении переменной снаружи.
+    """
+
+    def __init__(self, master, palette, options, value=None, variable=None,
+                 command=None, font_size=9, padx=12, pady=5, icon_size=15,
+                 **kwargs):
+        p = palette
+        super().__init__(master, bg=p["surface_alt"], padx=2, pady=2, **kwargs)
+        self.p = p
+        self.command = command
+        self.variable = variable
+        self._opts = [tuple(o) + (None,) * (3 - len(o)) for o in options]
+        self._font = ("Segoe UI", font_size)
+        self._icon_size = icon_size
+        self._value = None
+        self._cells = {}
+        self._hover = None
+        self._trace_id = None
+
+        for val, label, icon in self._opts:
+            cell = tk.Label(self, text=label, font=self._font, cursor="hand2",
+                            padx=padx, pady=pady, bd=0)
+            if icon:
+                cell.configure(compound="left")
+            cell.pack(side=tk.LEFT, padx=(0, 2))
+            cell.bind("<Button-1>", lambda e, v=val: self._choose(v))
+            cell.bind("<Enter>", lambda e, v=val: self._set_hover(v))
+            cell.bind("<Leave>", lambda e, v=val: self._set_hover(None))
+            self._cells[val] = (cell, icon)
+
+        if variable is not None:
+            self._trace_id = variable.trace_add(
+                "write", lambda *a: self._from_variable())
+            self.bind("<Destroy>", self._on_destroy, add="+")
+            self._from_variable()
+        else:
+            self.set(value if value is not None else self._opts[0][0])
+
+    # ---- публичный API
+    def get(self):
+        return self._value
+
+    def set(self, value, notify=False):
+        if value not in self._cells:
+            return
+        self._value = value
+        self._restyle()
+        if notify and self.command:
+            self.command(value)
+
+    # ---- внутреннее
+    def _choose(self, value):
+        if value == self._value:
+            return
+        self.set(value)
+        if self.variable is not None:
+            self.variable.set(value)
+        if self.command:
+            self.command(value)
+
+    def _from_variable(self):
+        try:
+            v = self.variable.get()
+        except Exception:
+            return
+        if v in self._cells and v != self._value:
+            self._value = v
+            self._restyle()
+
+    def _set_hover(self, value):
+        self._hover = value
+        self._restyle()
+
+    def _restyle(self):
+        p = self.p
+        for val, (cell, icon) in self._cells.items():
+            try:
+                if val == self._value:
+                    bg, fg = p["accent"], "#ffffff"
+                elif val == self._hover:
+                    bg, fg = p["surface_hi"], p["text"]
+                else:
+                    bg, fg = p["surface_alt"], p["text_dim"]
+                cell.configure(bg=bg, fg=fg)
+                if icon:
+                    img = icons.tk_icon(icon, self._icon_size, fg)
+                    cell.configure(image=img)
+                    cell._img = img
+            except tk.TclError:
+                return
+
+    def _on_destroy(self, event):
+        if event.widget is self and self._trace_id is not None:
+            try:
+                self.variable.trace_remove("write", self._trace_id)
+            except Exception:
+                pass
+            self._trace_id = None
+
+
+# ==============================================================
+#  ChipToggle — кнопка-«чип» с состоянием вкл/выкл (Ж, К, …)
+# ==============================================================
+class ChipToggle(tk.Label):
+    def __init__(self, master, palette, text="", value=False, command=None,
+                 font=("Segoe UI", 10, "bold"), width=3, **kwargs):
+        super().__init__(master, text=text, font=font, width=width, pady=4,
+                         cursor="hand2", bd=0, **kwargs)
+        self.p = palette
+        self.command = command
+        self._on = bool(value)
+        self._hv = False
+        self.bind("<Button-1>", lambda e: self.toggle())
+        self.bind("<Enter>", lambda e: self._hover(True))
+        self.bind("<Leave>", lambda e: self._hover(False))
+        self._restyle()
+
+    def get(self):
+        return self._on
+
+    def set(self, value):
+        self._on = bool(value)
+        self._restyle()
+
+    def toggle(self):
+        self._on = not self._on
+        self._restyle()
+        if self.command:
+            self.command(self._on)
+
+    def _hover(self, v):
+        self._hv = v
+        self._restyle()
+
+    def _restyle(self):
+        p = self.p
+        if self._on:
+            self.configure(bg=p["accent"], fg="#ffffff")
+        elif self._hv:
+            self.configure(bg=p["surface_hi"], fg=p["text"])
+        else:
+            self.configure(bg=p["surface_alt"], fg=p["text_dim"])
+
+
+# ==============================================================
+#  CaptionEntry — поле подписи под слотом (подсказка, подсветка фокуса)
+# ==============================================================
+class CaptionEntry(tk.Frame):
+    def __init__(self, master, palette, textvariable, placeholder="Подпись…",
+                 **kwargs):
+        p = palette
+        super().__init__(master, bg=p["slot_border"], padx=1, pady=1, **kwargs)
+        self.p = p
+        self.var = textvariable
+        inner = tk.Frame(self, bg=p["surface_alt"])
+        inner.pack(fill=tk.BOTH, expand=True)
+        self.entry = tk.Entry(
+            inner, textvariable=textvariable, bg=p["surface_alt"], fg=p["text"],
+            insertbackground=p["accent_hi"], relief="flat", bd=0,
+            highlightthickness=0, font=("Segoe UI", 9), justify="center",
+            selectbackground=p["accent"], selectforeground="#ffffff", width=1)
+        self.entry.pack(fill=tk.X, padx=8, pady=6)
+        self._ph = tk.Label(inner, text=placeholder, bg=p["surface_alt"],
+                            fg=p["text_faint"], font=("Segoe UI", 9),
+                            cursor="xterm")
+        self._ph.bind("<Button-1>", lambda e: self.entry.focus_set())
+        self.entry.bind("<FocusIn>", lambda e: self._focus(True), add="+")
+        self.entry.bind("<FocusOut>", lambda e: self._focus(False), add="+")
+        self.entry.bind("<Return>", self._next, add="+")
+        self._trace_id = textvariable.trace_add(
+            "write", lambda *a: self._sync_placeholder())
+        self.bind("<Destroy>", self._on_destroy, add="+")
+        self._sync_placeholder()
+
+    def _sync_placeholder(self):
+        try:
+            empty = not self.var.get()
+            if empty:
+                self._ph.place(relx=0.5, rely=0.5, anchor="center")
+            else:
+                self._ph.place_forget()
+        except tk.TclError:
+            pass
+
+    def _focus(self, on):
+        try:
+            self.configure(bg=self.p["accent"] if on else self.p["slot_border"])
+        except tk.TclError:
+            pass
+
+    def _next(self, event):
+        try:
+            nxt = self.entry.tk_focusNext()
+            if nxt is not None:
+                nxt.focus_set()
+        except tk.TclError:
+            pass
+        return "break"
+
+    def _on_destroy(self, event):
+        if event.widget is self:
+            try:
+                self.var.trace_remove("write", self._trace_id)
+            except Exception:
+                pass
