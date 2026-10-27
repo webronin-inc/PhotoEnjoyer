@@ -606,6 +606,9 @@ class GradientSlider(tk.Canvas):
         self.bind("<ButtonRelease-1>", self._on_release)
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
+        # слайдер уничтожили под курсором (<Leave> не придёт) — снять bind_all
+        self.bind("<Destroy>", lambda e: _wheel_release(self)
+                  if e.widget is self else None, add="+")
 
         self.bind("<Left>",  lambda e: self._nudge(-1))
         self.bind("<Right>", lambda e: self._nudge(+1))
