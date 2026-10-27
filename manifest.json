@@ -1,10 +1,10 @@
 {
-  "version": "0.0.0.19",
+  "version": "0.0.0.20",
   "release_date": "2026-10-27",
   "homepage": "https://github.com/webronin-inc/PhotoEnjoyer",
-  "download_url": "https://github.com/webronin-inc/PhotoEnjoyer/releases/download/v0.0.0.19/PhotoEnjoyer-Setup-0.0.0.19.exe",
-  "sha256": "d036be07793a39273c0ab7257d4b835c056b55113cba02d769a5ae3d5ac617b9",
-  "notes": "- Исправлено: редактор фото не открывался — ошибка «invalid command name \"330\"». Вкладки редактора затирали внутренний атрибут Tk (`_w`).\n- Исправлено: после закрытия редактора при вращении колеса мыши могла появляться ошибка «invalid command name» (привязка колеса у ползунков не снималась при их уничтожении).\n- Добавлены автотесты на оба случая.",
+  "download_url": "https://github.com/webronin-inc/PhotoEnjoyer/releases/download/v0.0.0.20/PhotoEnjoyer-Setup-0.0.0.20.exe",
+  "sha256": "e19d11e84738d02d835b603ef8b6cfa043e940938daca27e9ab03d0c95150c0f",
+  "notes": "- Подписи: окно «Подписи» (кнопка в шапке списка фото и «Правка → Подписи…») с живым образцом. Стили: плашка, капсула, контур; положение, выравнивание, шрифт (Times New Roman, Arial, Segoe UI, Georgia и др.), жирный/курсив, размер, до 4 строк, цвета, прозрачность подложки, тень.\n- Подписи: быстрые действия — нумерация по шаблону («Шаг {n}»), подписи из имён файлов, одна подпись для всех, очистка (всё отменяется).\n- Новый набор иконок: рисуется самой программой и не зависит от шрифта Segoe MDL2.\n- Интерфейс: сегментный переключатель режима, поля без белых рамок, тёмные выпадающие списки, иконки на кнопках, поле подписи с подсказкой и подсветкой фокуса, кнопка «Сохранить как…» растягивается на всю ширину.",
   "plugins": [],
-  "signature": "Gm1GtU3v3JGjnQutief3LBHVQzSBe7VAwbrdy2DJHz/FN49jnokvKRZETtIy7b9Gnqpq+vLxlJM+4fDujMQ1Dw=="
+  "signature": "pMHa2dA4SFT/kc/T86nGuBcjzVjXhONKuqEvI40fMESqW+mLqKoPV5D0VEmXRVAzA2xwrnoDV5FNcbFV96XcCg=="
 }
