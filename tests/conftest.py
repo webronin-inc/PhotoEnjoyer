@@ -5,6 +5,14 @@
 без скачивания полного лога.
 """
 import os
+import sys
+from pathlib import Path
+
+# Корень репозитория в sys.path: CI запускает просто `pytest` (не `python -m
+# pytest`), и без этого `import photogrid` на уровне модуля теста не работает.
+_ROOT = str(Path(__file__).resolve().parents[1])
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 
 def _esc(text):
@@ -25,5 +33,3 @@ def pytest_terminal_summary(terminalreporter):
             terminalreporter.write_line(
                 f"::error title={_esc('pytest: ' + rep.nodeid)}::"
                 f"{_esc((where + ' ' + msg)[:1500])}")
-
-collect_ignore = ["test_icons.py"]   # BISECT-TEMP
