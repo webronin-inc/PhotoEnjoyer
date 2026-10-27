@@ -1,10 +1,10 @@
 {
-  "version": "0.0.0.18",
+  "version": "0.0.0.19",
   "release_date": "2026-10-27",
   "homepage": "https://github.com/webronin-inc/PhotoEnjoyer",
-  "download_url": "https://github.com/webronin-inc/PhotoEnjoyer/releases/download/v0.0.0.18/PhotoEnjoyer-Setup-0.0.0.18.exe",
-  "sha256": "9ee7b1206adff504a30e224d2c365a3168e3e5ffd909e57af26dd6a660fa5650",
-  "notes": "- Исправлено: подсветка слотов «залипала» при быстром движении мыши — теперь после ухода курсора слот всегда возвращается в обычный вид.\n- Исправлено: ошибка «invalid command name» при работе с редактором фото — привязка колеса мыши теперь снимается при закрытии ползунка или области прокрутки.",
+  "download_url": "https://github.com/webronin-inc/PhotoEnjoyer/releases/download/v0.0.0.19/PhotoEnjoyer-Setup-0.0.0.19.exe",
+  "sha256": "d036be07793a39273c0ab7257d4b835c056b55113cba02d769a5ae3d5ac617b9",
+  "notes": "- Исправлено: редактор фото не открывался — ошибка «invalid command name \"330\"». Вкладки редактора затирали внутренний атрибут Tk (`_w`).\n- Исправлено: после закрытия редактора при вращении колеса мыши могла появляться ошибка «invalid command name» (привязка колеса у ползунков не снималась при их уничтожении).\n- Добавлены автотесты на оба случая.",
   "plugins": [],
-  "signature": "IFtzhi26cz4j1FflUXd025430DXdvMdrs2Hu7rAXz+PUd7cNAQEM/ISUS7TMCqRiNFFqgaXXLpt4ZQLy1YYOAg=="
+  "signature": "Gm1GtU3v3JGjnQutief3LBHVQzSBe7VAwbrdy2DJHz/FN49jnokvKRZETtIy7b9Gnqpq+vLxlJM+4fDujMQ1Dw=="
 }
