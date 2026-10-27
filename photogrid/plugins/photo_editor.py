@@ -83,7 +83,7 @@ class _TabBar(tk.Canvas):
         self.tabs = list(tabs)
         self.command = command
         self.current = self.tabs[0][0]
-        self._w = 330
+        self._bw = 330
         self._ux = 0.0
         self._uw = 0.0
         self.bind("<Configure>", self._on_resize)
@@ -93,7 +93,7 @@ class _TabBar(tk.Canvas):
     def _seg(self, key):
         n = max(1, len(self.tabs))
         i = [k for k, _ in self.tabs].index(key)
-        w = self._w / n
+        w = self._bw / n
         return i * w, w
 
     def _place_underline(self, animate=True):
@@ -115,20 +115,20 @@ class _TabBar(tk.Canvas):
         self._redraw()
 
     def _on_resize(self, e):
-        self._w = max(100, e.width)
+        self._bw = max(100, e.width)
         self._place_underline(animate=False)
 
     def _on_click(self, e):
         n = max(1, len(self.tabs))
-        i = max(0, min(n - 1, int(e.x // (self._w / n))))
+        i = max(0, min(n - 1, int(e.x // (self._bw / n))))
         self.command(self.tabs[i][0])
 
     def _redraw(self):
         self.delete("all")
         p = self.p
         h = int(self["height"])
-        seg = self._w / max(1, len(self.tabs))
-        self.create_line(0, h - 1, self._w, h - 1, fill=p["border_soft"])
+        seg = self._bw / max(1, len(self.tabs))
+        self.create_line(0, h - 1, self._bw, h - 1, fill=p["border_soft"])
         for i, (key, label) in enumerate(self.tabs):
             cur = key == self.current
             self.create_text(
