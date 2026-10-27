@@ -12,11 +12,14 @@ def _esc(text):
             .replace("\n", "%0A"))
 
 
-def pytest_runtest_logreport(report):
-    if not os.environ.get("GITHUB_ACTIONS") or not report.failed:
+def pytest_terminal_summary(terminalreporter):
+    if not os.environ.get("GITHUB_ACTIONS"):
         return
-    crash = getattr(report.longrepr, "reprcrash", None)
-    msg = crash.message if crash else str(report.longrepr)
-    where = f"{report.location[0]}:{report.location[1] + 1}"
-    print(f"\n::error title={_esc('pytest: ' + report.nodeid)}::"
-          f"{_esc((where + ' ' + msg)[:1500])}")
+    for kind in ("failed", "error"):
+        for rep in terminalreporter.stats.get(kind, []):
+            crash = getattr(rep.longrepr, "reprcrash", None)
+            msg = crash.message if crash else str(rep.longrepr)
+            where = f"{rep.location[0]}:{rep.location[1] + 1}"
+            terminalreporter.write_line(
+                f"::error title={_esc('pytest: ' + rep.nodeid)}::"
+                f"{_esc((where + ' ' + msg)[:1500])}")
