@@ -545,6 +545,33 @@ class GradientButton(tk.Canvas):
 
 
 # ==============================================================
+#  Глобальные привязки колеса мыши (безопасные)
+# ==============================================================
+# bind_all хранит Tcl-команду виджета-владельца. Если владельца уничтожили,
+# пока курсор над ним (<Leave> не приходит), привязка остаётся, а команда
+# удалена → «invalid command name ...» на каждый поворот колеса.
+# Поэтому помним владельца и снимаем привязку при <Destroy>.
+_WHEEL_SEQS = ("<MouseWheel>", "<Button-4>", "<Button-5>")
+_wheel_owner = {}
+
+
+def _wheel_claim(owner, handlers):
+    for seq, fn in handlers.items():
+        owner.bind_all(seq, fn)
+        _wheel_owner[seq] = owner
+
+
+def _wheel_release(owner):
+    for seq in _WHEEL_SEQS:
+        if _wheel_owner.get(seq) is owner:
+            _wheel_owner.pop(seq, None)
+            try:
+                owner.unbind_all(seq)
+            except Exception:
+                pass
+
+
+# ==============================================================
 #  Слайдер
 # ==============================================================
 class GradientSlider(tk.Canvas):
@@ -610,18 +637,18 @@ class GradientSlider(tk.Canvas):
     def _on_enter(self, event):
         self._hover = True
         anim.tween_attr(self, "_hv", 1.0, duration=130)
-        self.bind_all("<MouseWheel>", self._on_wheel_global)
-        self.bind_all("<Button-4>", lambda e: self._nudge(+1))
-        self.bind_all("<Button-5>", lambda e: self._nudge(-1))
+        _wheel_claim(self, {
+            "<MouseWheel>": self._on_wheel_global,
+            "<Button-4>": lambda e: self._nudge(+1),
+            "<Button-5>": lambda e: self._nudge(-1),
+        })
 
     def _on_leave(self, event):
         if self._drag:
             return
         self._hover = False
         anim.tween_attr(self, "_hv", 0.0, duration=130)
-        self.unbind_all("<MouseWheel>")
-        self.unbind_all("<Button-4>")
-        self.unbind_all("<Button-5>")
+        _wheel_release(self)
 
     def _on_wheel_global(self, event):
         if event.delta > 0:
@@ -974,17 +1001,22 @@ def enable_mousewheel(canvas):
         return "break"
 
     def _on_enter(event):
-        canvas.bind_all("<MouseWheel>", _on_wheel)
-        canvas.bind_all("<Button-4>", _on_wheel_linux_up)
-        canvas.bind_all("<Button-5>", _on_wheel_linux_down)
+        _wheel_claim(canvas, {
+            "<MouseWheel>": _on_wheel,
+            "<Button-4>": _on_wheel_linux_up,
+            "<Button-5>": _on_wheel_linux_down,
+        })
 
     def _on_leave(event):
-        canvas.unbind_all("<MouseWheel>")
-        canvas.unbind_all("<Button-4>")
-        canvas.unbind_all("<Button-5>")
+        _wheel_release(canvas)
+
+    def _on_destroy(event):
+        if event.widget is canvas:
+            _wheel_release(canvas)
 
     canvas.bind("<Enter>", _on_enter, add="+")
     canvas.bind("<Leave>", _on_leave, add="+")
+    canvas.bind("<Destroy>", _on_destroy, add="+")
 
 
 # ==============================================================
