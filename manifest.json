@@ -1,10 +1,10 @@
 {
-  "version": "0.0.0.17",
-  "release_date": "2026-10-26",
+  "version": "0.0.0.18",
+  "release_date": "2026-10-27",
   "homepage": "https://github.com/webronin-inc/PhotoEnjoyer",
-  "download_url": "https://github.com/webronin-inc/PhotoEnjoyer/releases/download/v0.0.0.17/PhotoEnjoyer-Setup-0.0.0.17.exe",
-  "sha256": "ec60dc4488f10f672486b6b3208623f3e7bfcd4da72fc71aac7b46539c29fd9b",
-  "notes": "Обновление",
+  "download_url": "https://github.com/webronin-inc/PhotoEnjoyer/releases/download/v0.0.0.18/PhotoEnjoyer-Setup-0.0.0.18.exe",
+  "sha256": "9ee7b1206adff504a30e224d2c365a3168e3e5ffd909e57af26dd6a660fa5650",
+  "notes": "- Исправлено: подсветка слотов «залипала» при быстром движении мыши — теперь после ухода курсора слот всегда возвращается в обычный вид.\n- Исправлено: ошибка «invalid command name» при работе с редактором фото — привязка колеса мыши теперь снимается при закрытии ползунка или области прокрутки.",
   "plugins": [],
-  "signature": "pZWozrR9OXmCe72PsF40F9XRzC9PNAX7L9zfWW4nJnc4/i6tiev0PZQTdu4h+Hs3B2x5QhKcQojsQDJxrByoAQ=="
+  "signature": "IFtzhi26cz4j1FflUXd025430DXdvMdrs2Hu7rAXz+PUd7cNAQEM/ISUS7TMCqRiNFFqgaXXLpt4ZQLy1YYOAg=="
 }
