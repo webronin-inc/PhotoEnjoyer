@@ -61,6 +61,7 @@ class Animator:
         if key is not None:
             self.cancel(key)
 
+        duration_ms = duration_ms * _SPEED.get(LEVEL, 1.0)
         if not self.enabled or duration_ms <= 0:
             # без анимации — сразу в конечное состояние
             self._safe_call(on_update, 1.0)
@@ -188,6 +189,28 @@ def set_enabled(enabled):
 
 def is_enabled():
     return _default_enabled
+
+
+# Уровни анимации: full — всё, soft — быстрее и без «эффектов» (частицы,
+# рябь, конфетти), off — без анимаций (для слабых ПК и тех, кому мешает).
+LEVELS = ("full", "soft", "off")
+LEVEL = "full"
+_SPEED = {"full": 1.0, "soft": 0.65, "off": 0.0}
+
+
+def set_level(level):
+    global LEVEL
+    LEVEL = level if level in _SPEED else "full"
+    set_enabled(LEVEL != "off")
+
+
+def level():
+    return LEVEL
+
+
+def effects_enabled():
+    """Декоративные эффекты (частицы, рябь, конфетти, неоновое мерцание)."""
+    return LEVEL == "full" and _default_enabled
 
 
 def tween_attr(widget, attr, target, duration=140, easing=ease_out_cubic,

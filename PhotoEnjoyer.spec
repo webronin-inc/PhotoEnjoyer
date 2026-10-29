@@ -25,6 +25,11 @@ if key_path.exists():
 else:
     print(f"[spec] ⚠ public_key.pem не найден: {key_path}")
 
+# список изменений нужен окну «О программе» (блок «Что нового»)
+changelog_path = HERE / "CHANGELOG.md"
+if changelog_path.exists():
+    extra_datas.append((str(changelog_path), "."))
+
 # Иконка окна
 icon_path = HERE / "photogrid" / "icon.ico"
 if icon_path.exists():

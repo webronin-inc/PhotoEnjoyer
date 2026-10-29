@@ -1,5 +1,7 @@
 """Ручная обрезка каждого фото перед сборкой коллажа."""
 import tkinter as tk
+
+from .. import fx
 from tkinter import messagebox, ttk
 from PIL import Image, ImageTk
 
@@ -34,7 +36,7 @@ class _CropDialog:
         self._disp_pos = (0, 0)
 
         p = app.palette
-        self.top = tk.Toplevel(app.root)
+        self.top = fx.toplevel(app.root)
         self.top.title("Редактор обрезки")
         self.top.configure(bg=p["surface"])
         self.top.geometry("960x720")

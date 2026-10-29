@@ -4,7 +4,10 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, simpledialog
 
-from .. import branding
+from .. import anim, branding, icons
+from ..config import LAYOUTS
+from ..ui_widgets import (GradientButton, _blend_hex, enable_mousewheel,
+                          rounded_rect)
 
 
 def _templates_path():
@@ -53,8 +56,8 @@ BUILTIN = [
         "bg_color": "#f0f0f0",
     },
     {
-        "name": "Плёнка 1×4",
-        "desc": "Горизонтальная лента",
+        "name": "Плёнка",
+        "desc": "Четыре кадра в ряд",
         "layout": "4×1 — горизонтальная полоса",
         "mode": "fill",
         "cell_size": 600,
@@ -63,8 +66,8 @@ BUILTIN = [
         "bg_color": "#000000",
     },
     {
-        "name": "Столбик 4×1",
-        "desc": "Вертикальная лента",
+        "name": "Столбик",
+        "desc": "Четыре кадра в столбик",
         "layout": "1×4 — вертикальная полоса",
         "mode": "fit",
         "cell_size": 700,
@@ -104,77 +107,74 @@ def build_templates_view(parent, app):
 
     # Заголовок
     head = tk.Frame(root, bg=p["bg"])
-    head.pack(fill=tk.X, padx=8, pady=(6, 16))
-    tk.Label(head, text="Шаблоны раскладок",
-             bg=p["bg"], fg=p["text"],
-             font=("Segoe UI", 16, "bold"),
-             anchor="w").pack(side=tk.LEFT)
-    tk.Label(head, text="Клик — применить раскладку",
-             bg=p["bg"], fg=p["text_dim"],
-             font=("Segoe UI", 10)).pack(side=tk.LEFT, padx=(16, 0))
+    head.pack(fill=tk.X, padx=8, pady=(6, 14))
+    ic = tk.Canvas(head, width=48, height=48, bg=p["bg"], highlightthickness=0)
+    ic.pack(side=tk.LEFT)
+    icons.draw_neon(ic, "template", 24, 24, size=26, color=icons.NEON["pink"])
+    box = tk.Frame(head, bg=p["bg"])
+    box.pack(side=tk.LEFT, padx=(10, 0))
+    tk.Label(box, text="Шаблоны", bg=p["bg"], fg=p["text"],
+             font=("Segoe UI", 18, "bold"), anchor="w").pack(anchor="w")
+    tk.Label(box, text="Один клик — раскладка, рамки и цвета применятся сразу",
+             bg=p["bg"], fg=p["text_dim"], font=("Segoe UI", 10),
+             anchor="w").pack(anchor="w")
 
-    # Скроллируемая область
-    outer = tk.Frame(root, bg=p["bg"])
-    outer.pack(fill=tk.BOTH, expand=True)
-
-    canvas = tk.Canvas(outer, bg=p["bg"], highlightthickness=0)
-    scroll = tk.Scrollbar(outer, orient="vertical", command=canvas.yview)
-    inner = tk.Frame(canvas, bg=p["bg"])
-
-    inner.bind(
-        "<Configure>",
-        lambda e: canvas.configure(scrollregion=canvas.bbox("all")),
-    )
-    canvas.create_window((0, 0), window=inner, anchor="nw")
-    canvas.configure(yscrollcommand=scroll.set)
-    canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-    scroll.pack(side=tk.RIGHT, fill=tk.Y)
-
-    # Секция "Готовые"
-    _section_label(inner, "Готовые", p)
-    grid_builtin = tk.Frame(inner, bg=p["bg"])
-    grid_builtin.pack(fill=tk.X, padx=8, pady=(0, 16))
-
-    for i, tpl in enumerate(BUILTIN):
-        card = _TemplateCard(grid_builtin, p, tpl, app,
-                             on_click=lambda t=tpl: _apply_template(app, t))
-        card.grid(row=i // 3, column=i % 3, padx=8, pady=8, sticky="nsew")
-
-    # Секция "Мои"
-    _section_label(inner, "Мои шаблоны", p)
-    grid_user = tk.Frame(inner, bg=p["bg"])
-    grid_user.pack(fill=tk.X, padx=8, pady=(0, 16))
-
-    user = _load_user_templates()
-    if not user:
-        tk.Label(grid_user,
-                 text="Пока нет сохранённых шаблонов.\n"
-                      "Настройте раскладку и нажмите «Сохранить как шаблон».",
-                 bg=p["bg"], fg=p["text_dim"],
-                 font=("Segoe UI", 10), justify="left"
-                 ).pack(anchor="w", padx=4, pady=8)
-    else:
-        for i, (name, tpl) in enumerate(user.items()):
-            card = _TemplateCard(grid_user, p, {**tpl, "name": name},
-                                 app, on_click=lambda t=tpl: _apply_template(app, t),
-                                 on_delete=lambda n=name: _delete_user_template(app, n, root))
-            card.grid(row=i // 3, column=i % 3, padx=8, pady=8, sticky="nsew")
-
-    # Кнопка "Сохранить текущие как шаблон"
+    # Кнопка «Сохранить» закреплена внизу
     bottom = tk.Frame(root, bg=p["bg"])
-    bottom.pack(fill=tk.X, padx=8, pady=(12, 6))
+    bottom.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=(10, 8))
+    GradientButton(bottom, p, text="Сохранить текущее как шаблон", icon="save",
+                   height=42, command=lambda: _save_current_as_template(app, root)
+                   ).pack(anchor="w")
 
-    tk.Button(
-        bottom,
-        text="  Сохранить текущие как шаблон",
-        bg=p["accent"], fg="#ffffff",
-        activebackground=p["accent_hi"], activeforeground="#ffffff",
-        bd=0, relief="flat", cursor="hand2",
-        font=("Segoe UI", 10, "bold"),
-        padx=18, pady=10,
-        command=lambda: _save_current_as_template(app, root),
-    ).pack(anchor="w")
+    # Прокручиваемая область (колесо мыши; без нативного скроллбара)
+    canvas = tk.Canvas(root, bg=p["bg"], highlightthickness=0)
+    inner = tk.Frame(canvas, bg=p["bg"])
+    win = canvas.create_window((0, 0), window=inner, anchor="nw")
+    canvas.pack(fill=tk.BOTH, expand=True)
+    inner.bind("<Configure>",
+               lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    canvas.bind("<Configure>", lambda e: canvas.itemconfigure(win, width=e.width))
+    enable_mousewheel(canvas)
 
+    cards = []                                  # (frame-сетка, [карточки])
+
+    def build_grid(title, items, empty_text):
+        _section_label(inner, title, p)
+        grid = tk.Frame(inner, bg=p["bg"])
+        grid.pack(fill=tk.X, padx=8, pady=(0, 14))
+        if not items:
+            tk.Label(grid, text=empty_text, bg=p["bg"], fg=p["text_dim"],
+                     font=("Segoe UI", 10), justify="left"
+                     ).pack(anchor="w", padx=4, pady=6)
+            return
+        lst = []
+        for i, (tpl, deletable) in enumerate(items):
+            kw = {}
+            if deletable:
+                kw["on_delete"] = lambda n=tpl["name"]: _delete_user_template(
+                    app, n, root)
+            card = _TemplateCard(grid, p, tpl, on_click=lambda t=tpl: _apply_template(app, t),
+                                 index=i, **kw)
+            lst.append(card)
+        cards.append((grid, lst))
+
+    build_grid("Готовые", [(t, False) for t in BUILTIN], "")
+    user = _load_user_templates()
+    build_grid("Мои шаблоны",
+               [({**t, "name": n}, True) for n, t in user.items()],
+               "Пока пусто. Настройте раскладку и нажмите\n"
+               "«Сохранить текущее как шаблон» — он появится здесь.")
+
+    def reflow(_e=None):
+        width = max(canvas.winfo_width(), 1)
+        cols = max(1, (width - 16) // (_TemplateCard.W + 16))
+        for grid, lst in cards:
+            for i, card in enumerate(lst):
+                card.grid(row=i // cols, column=i % cols, padx=8, pady=8)
+
+    canvas.bind("<Configure>",
+                lambda e: (canvas.itemconfigure(win, width=e.width), reflow()))
+    root.after(30, reflow)
     return root
 
 
@@ -186,94 +186,114 @@ def _section_label(parent, text, p):
              anchor="w").pack(fill=tk.X, padx=8, pady=(8, 4))
 
 
-class _TemplateCard(tk.Frame):
-    def __init__(self, parent, p, tpl, app, on_click, on_delete=None):
-        super().__init__(parent, bg=p["surface"],
-                         highlightthickness=1,
-                         highlightbackground=p["border"])
+_CELL_HUES = ("violet", "cyan", "pink", "lime", "orange", "blue", "red", "white")
+
+
+class _TemplateCard(tk.Canvas):
+    """Карточка шаблона: миниатюра в цветах шаблона, всплытие при наведении,
+    плавное появление (каскадом)."""
+    W, H = 228, 160
+
+    def __init__(self, parent, p, tpl, on_click, on_delete=None, index=0):
+        super().__init__(parent, width=self.W, height=self.H, bg=p["bg"],
+                         highlightthickness=0, cursor="hand2")
         self.p = p
         self.tpl = tpl
         self._on_click = on_click
         self._on_delete = on_delete
-        self._hover = False
+        self._hv = 0.0               # наведение 0..1
+        self._rv = 0.0               # появление 0..1
+        self._del_hot = False
+        cols, rows = LAYOUTS.get(tpl.get("layout", ""), (2, 2))
+        self._cols, self._rows = cols, rows
 
-        self.configure(width=220, height=140)
-        self.pack_propagate(False)
-        self.grid_propagate(False)
+        self.bind("<Enter>", lambda e: anim.tween_attr(self, "_hv", 1.0, 160))
+        self.bind("<Leave>", lambda e: (self._set_del(False),
+                                        anim.tween_attr(self, "_hv", 0.0, 220)))
+        self.bind("<Motion>", self._motion)
+        self.bind("<Button-1>", self._click)
+        self.bind("<Destroy>", self._on_destroy, add="+")
 
-        # Иконка раскладки на Canvas
-        preview = tk.Canvas(self, width=200, height=70,
-                            bg=p["surface"], highlightthickness=0)
-        preview.pack(pady=(10, 6))
-        self._draw_layout_preview(preview, tpl.get("layout", ""))
+        def reveal(t):
+            self._rv = t
+            self._redraw()
 
-        # Название
-        tk.Label(self, text=tpl.get("name", "Шаблон"),
-                 bg=p["surface"], fg=p["text"],
-                 font=("Segoe UI", 10, "bold"),
-                 anchor="w").pack(fill=tk.X, padx=14)
+        anim.get(self).animate(420, reveal, delay_ms=70 * index,
+                               key=(id(self), "reveal"))
 
-        # Описание
-        desc = tpl.get("desc", "")
-        if not desc:
-            desc = f"{tpl.get('cell_size', 800)}px · рамка {tpl.get('border', 10)}"
-        tk.Label(self, text=desc,
-                 bg=p["surface"], fg=p["text_dim"],
-                 font=("Segoe UI", 8),
-                 anchor="w").pack(fill=tk.X, padx=14, pady=(0, 8))
+    # ---- события
+    def _set_del(self, v):
+        if v != self._del_hot:
+            self._del_hot = v
+            self._redraw()
 
-        # Кнопка удаления
-        if on_delete:
-            del_btn = tk.Label(self, text="✕",
-                               bg=p["surface"], fg=p["text_faint"],
-                               font=("Segoe UI", 10), cursor="hand2")
-            del_btn.place(relx=1.0, rely=0.0, x=-10, y=6, anchor="ne")
-            del_btn.bind("<Button-1>", lambda e: on_delete())
+    def _in_delete(self, x, y):
+        return bool(self._on_delete) and x > self.W - 40 and y < 40
 
-        # Hover
-        for w in (self, preview):
-            w.bind("<Enter>", self._on_enter, add="+")
-            w.bind("<Leave>", self._on_leave, add="+")
-            w.bind("<Button-1>", lambda e: on_click(), add="+")
+    def _motion(self, e):
+        self._set_del(self._in_delete(e.x, e.y))
 
-    def _on_enter(self, _):
-        self.configure(highlightbackground=self.p["accent"],
-                       highlightthickness=2)
-
-    def _on_leave(self, _):
-        self.configure(highlightbackground=self.p["border"],
-                       highlightthickness=1)
-
-    @staticmethod
-    def _draw_layout_preview(canvas, layout_name):
-        """Рисует миниатюру раскладки."""
-        W, H = 200, 70
-        color = "#5a5a70"
-        pad = 6
-
-        if "2×2" in layout_name:
-            cols, rows = 2, 2
-        elif "4×1" in layout_name or "горизонтальная" in layout_name:
-            cols, rows = 4, 1
-        elif "1×4" in layout_name or "вертикальная" in layout_name:
-            cols, rows = 1, 4
+    def _click(self, e):
+        if self._in_delete(e.x, e.y):
+            self._on_delete()
         else:
-            cols, rows = 2, 2
+            self._on_click()
 
-        cell_w = (W - pad * (cols + 1)) / cols
-        cell_h = (H - pad * (rows + 1)) / rows
+    def _on_destroy(self, event):
+        if event.widget is self:
+            an = anim.get(self)
+            an.cancel((id(self), "reveal"))
+            an.cancel((id(self), "_hv"))
 
-        for r in range(rows):
-            for c in range(cols):
-                x1 = pad + c * (cell_w + pad)
-                y1 = pad + r * (cell_h + pad)
-                x2 = x1 + cell_w
-                y2 = y1 + cell_h
-                canvas.create_rectangle(x1, y1, x2, y2,
-                                        outline=color, width=1)
+    # ---- рисование
+    def _redraw(self):
+        try:
+            self.delete("all")
+        except tk.TclError:
+            return
+        p, W, H = self.p, self.W, self.H
+        hv, rv = self._hv, self._rv
+        rise = (1 - rv) * 18                  # «выезжает» снизу
+        lift = -4 * hv                        # приподнимается при наведении
+        dy = rise + lift
+        fade = lambda c: _blend_hex(c, p["bg"], rv)
+
+        card_fill = _blend_hex(p["surface_hi"], p["surface"], hv)
+        border = _blend_hex(p["accent"], p["border"], hv)
+        rounded_rect(self, 3, 6 + dy, W - 3, H - 3 + dy, radius=16,
+                     fill=fade(card_fill), outline=fade(border),
+                     width=1 + int(hv * 1.2))
+
+        # миниатюра: фон и рамка шаблона, ячейки — неоновые оттенки
+        bg = self.tpl.get("bg_color") or "#ffffff"
+        px0, py0, px1, py1 = 16, 18 + dy, W - 16, 92 + dy
+        rounded_rect(self, px0, py0, px1, py1, radius=9, fill=fade(bg), outline="")
+        gap = 3 + min(7, int(self.tpl.get("border", 10)) // 4)
+        cw = (px1 - px0 - gap * (self._cols + 1)) / self._cols
+        ch = (py1 - py0 - gap * (self._rows + 1)) / self._rows
+        k = 0
+        for r in range(self._rows):
+            for c in range(self._cols):
+                x0 = px0 + gap + c * (cw + gap)
+                y0 = py0 + gap + r * (ch + gap)
+                hue = icons.NEON[_CELL_HUES[k % len(_CELL_HUES)]]
+                k += 1
+                col = _blend_hex(hue, bg, 0.55 + 0.30 * hv)
+                rounded_rect(self, x0, y0, x0 + cw, y0 + ch, radius=3,
+                             fill=fade(col), outline="")
+
+        name = self.tpl.get("name", "Шаблон")
+        desc = self.tpl.get("desc") or (
+            f"{self.tpl.get('cell_size', 800)} px · рамка {self.tpl.get('border', 10)}")
+        self.create_text(18, 112 + dy, text=name, anchor="w",
+                         fill=fade(p["text"]), font=("Segoe UI", 11, "bold"))
+        self.create_text(18, 134 + dy, text=desc, anchor="w",
+                         fill=fade(p["text_dim"]), font=("Segoe UI", 9))
+        if self._on_delete and hv > 0.05:
+            col = p["danger"] if self._del_hot else p["text_faint"]
+            icons.draw(self, "close", W - 26, 30 + dy, size=14, color=fade(col))
 
 
-# ==============================================================
 def _apply_template(app, tpl):
     try:
         from ..config import LAYOUTS
