@@ -4,6 +4,7 @@ from tkinter import colorchooser
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
 from .. import branding
+from .. import fx
 from ..core import build_collage
 from ..ui_widgets import GradientSlider
 
@@ -124,7 +125,7 @@ class _WatermarkDialog:
         self._preview_job = None       # отложенная задача обновления
 
         p = self.palette
-        self.top = tk.Toplevel(app.root)
+        self.top = fx.toplevel(app.root)
         self.top.title("Водяной знак")
         self.top.configure(bg=p["surface"])
         self.top.geometry("980x660")
