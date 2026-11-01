@@ -257,14 +257,19 @@ def build_admin_view(parent, app):
                 dialogs.confirm(app, "Сменить роль?", f"{u['username']} станет «{new}».",
                                 lambda: act("set-role", {"role": new}, "Роль изменена"))
 
-        for text, cmd, danger in (("Заблокировать / разблокировать", ban, False), ("Продлить…", extend, False),
+        buttons = (("Заблокировать / разблокировать", ban, False), ("Продлить…", extend, False),
                                   ("Бессрочно", lambda: act("unlimited", toast="Лицензия бессрочная"), False),
                                   ("Отозвать лицензию", lambda: act("revoke-license", toast="Лицензия отозвана"), False),
                                   ("Лимит устройств…", devices, False),
                                   ("Сбросить устройства", lambda: act("reset-devices", toast="Устройства сброшены"), False),
                                   ("Новый пароль", reset_pw, False), ("Заметка", note, False),
-                                  ("Роль", role, False), ("Удалить", delete, True)):
-            _btn(acts, p, text, cmd, danger).pack(side=tk.LEFT, padx=(0, 6), pady=2)
+                                  ("Роль", role, False), ("Удалить", delete, True))
+        for i, (text, cmd, danger) in enumerate(buttons):       # два ряда, чтобы всё влезало
+            _btn(acts, p, text, cmd, danger).grid(row=i // 5, column=i % 5, sticky="ew",
+                                                  padx=(0, 6), pady=3)
+        for c in range(5):
+            acts.columnconfigure(c, weight=1, uniform="ab")
+
 
         def draw(res):
             rows = []

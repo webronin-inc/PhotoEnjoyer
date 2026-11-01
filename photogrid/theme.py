@@ -244,6 +244,15 @@ def apply_theme(root, name="dark"):
                     font=("Segoe UI", 9, "bold"), padding=(8, 8))
     style.map("Treeview.Heading", background=[("active", palette["surface_hi"])])
 
+    # полосы прокрутки в тон интерфейсу (clam по умолчанию светлый)
+    for orient in ("Vertical", "Horizontal"):
+        st = f"{orient}.TScrollbar"
+        style.configure(st, background=palette["surface_hi"], troughcolor=palette["surface_alt"],
+                        bordercolor=palette["surface_alt"], lightcolor=palette["surface_hi"],
+                        darkcolor=palette["surface_hi"], arrowcolor=palette["text_dim"],
+                        relief="flat", gripcount=0, arrowsize=12)
+        style.map(st, background=[("active", palette["border"]), ("pressed", palette["accent"])])
+
     style.configure("TScale",
                     background=palette["surface"],
                     troughcolor=palette["surface_alt"],

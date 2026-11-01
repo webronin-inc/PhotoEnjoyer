@@ -13,6 +13,16 @@ from ..ui_widgets import (GradientButton, _blend_hex, enable_mousewheel,
                           rounded_rect)
 
 
+def _plural(n, forms):
+    """1 шаблон · 2 шаблона · 5 шаблонов."""
+    n = abs(int(n))
+    if n % 10 == 1 and n % 100 != 11:
+        return forms[0]
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return forms[1]
+    return forms[2]
+
+
 def _hue_for(pack_id):
     h = int(hashlib.md5(pack_id.encode()).hexdigest()[:4], 16) / 65535.0
     r, g, b = colorsys.hsv_to_rgb(h, 0.55, 1.0)
@@ -75,7 +85,8 @@ class _PackCard(tk.Canvas):
         it = self.item
         self.create_text(78, 36 + dy, text=it["name"][:26], anchor="w", fill=fade(p["text"]),
                          font=("Segoe UI", 12, "bold"))
-        meta = f"{it.get('count', 0)} шаблонов · v{it.get('version', '1')}"
+        n = it.get("count", 0)
+        meta = f"{n} {_plural(n, ('шаблон', 'шаблона', 'шаблонов'))} · v{it.get('version', '1')}"
         if it.get("author"):
             meta += f" · {it['author']}"
         self.create_text(78, 58 + dy, text=meta[:42], anchor="w", fill=fade(p["text_dim"]),

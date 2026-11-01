@@ -141,7 +141,8 @@ def build_account_view(parent, app):
     # ---- лицензия
     def draw_license():
         clear(lic)
-        st, exp, plan = s.license_state, s.license.get("expires"), s.license.get("plan") or "—"
+        st, exp = s.license_state, s.license.get("expires")
+        plan = s.license.get("plan") or ("Администратор" if s.is_admin else "—")
         days = s.days_left()
         if st != "active":
             col, chip = icons.NEON["red"], {"expired": "Истекла", "revoked": "Отозвана"}.get(st, "Нет лицензии")

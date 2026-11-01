@@ -307,3 +307,11 @@ def _walk(w):
     yield w
     for c in w.winfo_children():
         yield from _walk(c)
+
+
+def test_plural_forms_for_pack_cards():
+    from photogrid.screens.library import _plural
+    f = ("шаблон", "шаблона", "шаблонов")
+    assert [_plural(n, f) for n in (1, 2, 4, 5, 11, 12, 21, 22, 25, 101, 111)] == [
+        "шаблон", "шаблона", "шаблона", "шаблонов", "шаблонов", "шаблонов",
+        "шаблон", "шаблона", "шаблонов", "шаблон", "шаблонов"]
