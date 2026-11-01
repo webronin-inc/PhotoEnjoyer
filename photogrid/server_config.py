@@ -8,7 +8,7 @@
     2. положите открытый ключ сервера в photogrid/license_pub.pem
        (python -m server.manage public-key)
 """
-SERVER_URL = ""
+SERVER_URL = "https://endlessoder.pythonanywhere.com"
 
 # Куда вести пользователя, если нужен ключ/поддержка (показывается на экране входа)
 SUPPORT_HINT = "Ключ выдаёт администратор."

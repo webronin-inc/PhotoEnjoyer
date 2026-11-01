@@ -315,3 +315,15 @@ def test_plural_forms_for_pack_cards():
     assert [_plural(n, f) for n in (1, 2, 4, 5, 11, 12, 21, 22, 25, 101, 111)] == [
         "шаблон", "шаблона", "шаблона", "шаблонов", "шаблонов", "шаблонов",
         "шаблон", "шаблона", "шаблонов", "шаблон", "шаблонов"]
+
+
+def test_network_error_offers_recovery_download_page(world):
+    ls = _login_screen(world, resume=False)
+    pump(world.root, 0.3)
+    ls.api = ApiClient("http://127.0.0.1:9", timeout=1, app_version="1")   # «сервер недоступен»
+    ls.in_user.var.set("nobody"); ls.in_pass.var.set("password-1")
+    ls._submit()
+    assert pump_until(world.root, lambda: ls.steps.state["network"][0] == "fail", 8)
+    pump(world.root, 0.3)
+    texts = [w.cget("text") for w in _walk(ls.extra) if w.winfo_class() == "Button"]
+    assert "Повторить" in texts and "Страница загрузки" in texts

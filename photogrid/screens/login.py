@@ -749,6 +749,9 @@ class LoginScreen:
             btn("Повторить", self._retry, True)
             if store.load():
                 btn("Работать без сети", self._offline)
+            # запасной выход: если с сервером беда, свежую версию можно скачать вручную
+            btn("Страница загрузки", lambda: webbrowser.open(
+                branding.APP_HOMEPAGE + "/releases/latest"))
         elif e.action == "activate":
             btn("Ввести ключ", lambda: self._need_activation(None), True)
         elif e.action == "wait" and e.code == "locked":

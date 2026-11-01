@@ -53,6 +53,10 @@ jobs:
           choco install innosetup -y --no-progress
 
       - name: Build EXE and Installer
+        # подпись кода включается сама, если заданы секреты CODESIGN_* (docs/SIGNING.md)
+        env:
+          PE_SIGN_PFX_BASE64: ${{ secrets.CODESIGN_PFX_BASE64 }}
+          PE_SIGN_PASSWORD: ${{ secrets.CODESIGN_PASSWORD }}
         run: python build.py
 
       - name: Create GitHub Release

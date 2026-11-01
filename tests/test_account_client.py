@@ -258,10 +258,24 @@ def test_library_download_through_api(env):
 def test_enforced_requires_url_and_public_key(monkeypatch, tmp_path):
     monkeypatch.delenv("PE_SERVER_URL", raising=False)
     monkeypatch.delenv("PE_LICENSE_PUB", raising=False)
-    assert gate.enforced() is False
+    monkeypatch.setattr(gate.server_config, "SERVER_URL", "")
+    monkeypatch.setattr(gate, "public_key", lambda: None)
+    assert gate.enforced() is False                         # ни адреса, ни ключа
     monkeypatch.setenv("PE_SERVER_URL", "https://x.pythonanywhere.com")
     assert gate.enforced() is False                         # нет ключа
     pem = tmp_path / "pub.pem"
     pem.write_bytes(security.public_pem(security.load_or_create_keypair(str(tmp_path / "k"))))
+    monkeypatch.undo()
+    monkeypatch.setenv("PE_SERVER_URL", "https://x.pythonanywhere.com")
     monkeypatch.setenv("PE_LICENSE_PUB", str(pem))
+    assert gate.enforced() is True
+
+
+def test_shipped_public_key_is_a_valid_ed25519_key_and_url_is_set():
+    """Файлы, которые уходят в сборку: ключ сервера и его адрес."""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    from photogrid import server_config
+    key = gate.public_key()
+    assert isinstance(key, Ed25519PublicKey)
+    assert server_config.SERVER_URL.startswith("https://")
     assert gate.enforced() is True
