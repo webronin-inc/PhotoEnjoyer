@@ -108,6 +108,7 @@ class _BatchDialog:
         try:
             jobs = self._collect_jobs(src)
             total = len(jobs)
+            self.app.track("batch_run", jobs=total)
             self._set_progress(0, total)
             done = 0
             for name, photos in jobs:

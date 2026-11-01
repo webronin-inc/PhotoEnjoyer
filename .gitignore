@@ -12,3 +12,9 @@ keys/private_key.pem
 keys/_tmp_private.pem
 run.log
 *.part
+
+# секреты подписи кода и сервера — никогда в репозиторий
+secrets/
+*.pfx
+photoenjoyer_data/
+server/data/

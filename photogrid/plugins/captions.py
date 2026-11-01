@@ -318,6 +318,7 @@ class CaptionDialog:
         self.app.config[key] = value
         if key == "caption_style":
             self._update_visibility()
+            self.app.track("caption_style", style=value)
         self._schedule_sample()
         self.app.schedule_preview()
         self._schedule_save()

@@ -30,6 +30,12 @@ changelog_path = HERE / "CHANGELOG.md"
 if changelog_path.exists():
     extra_datas.append((str(changelog_path), "."))
 
+# открытый ключ сервера лицензий (если уже настроен) — проверка токенов без сети
+pub_path = HERE / "photogrid" / "license_pub.pem"
+if pub_path.exists():
+    extra_datas.append((str(pub_path), "photogrid"))
+    print("[spec] ✓ license_pub.pem вшит")
+
 # Иконка окна
 icon_path = HERE / "photogrid" / "icon.ico"
 if icon_path.exists():

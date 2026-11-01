@@ -34,8 +34,9 @@ for _s in (sys.stdout, sys.stderr):
 
 
 class App:
-    def __init__(self, root):
+    def __init__(self, root, session=None):
         self.root = root
+        self.session = session      # вошедший пользователь (None — вход отключён)
         self.config = Config()
         self.palette = DARK if self.config["theme"] == "dark" else LIGHT
 
@@ -83,6 +84,8 @@ class App:
         self._task_queue = queue.Queue()
         self._task_poll = None
         self._tasks_running = 0
+        # необработанные ошибки интерфейса — в консоль и (если вошли) в журнал сервера
+        self.root.report_callback_exception = self._on_tk_error
 
         anim.set_level(self.config["anim_level"])
 
@@ -113,6 +116,10 @@ class App:
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self._fade_in_window()
+        if self.session is not None:
+            self.session.telemetry.start()
+            self.track("app_start")
+            self.root.after(30 * 60 * 1000, self._session_watch)
 
     def _fade_in_window(self):
         """Плавное появление окна при запуске."""
@@ -205,8 +212,8 @@ class App:
          "Готовые и свои стили оформления", "view"),
         ("batch", "layers", "orange", "Пакетная обработка",
          "Сразу много папок — в коллажи", "view"),
-        ("cloud", "cloud", "blue", "Облако",
-         "Проекты и коллажи онлайн", "view"),
+        ("library", "book", "blue", "Библиотека",
+         "Наборы шаблонов от автора", "view"),
         None,
         ("editor", "edit", "cyan", "Редактор фото",
          "Фильтры, обрезка, рисование · Ctrl+E", "action"),
@@ -220,7 +227,9 @@ class App:
         "plugins": ("screens.plugins", "build_plugins_view"),
         "batch": ("screens.batch", "build_batch_view"),
         "templates": ("screens.templates", "build_templates_view"),
-        "cloud": ("screens.cloud", "build_cloud_view"),
+        "library": ("screens.library", "build_library_view"),
+        "account": ("screens.account", "build_account_view"),
+        "admin": ("screens.admin", "build_admin_view"),
     }
 
     def _build_rail(self):
@@ -242,7 +251,11 @@ class App:
             # «белый» неон на светлой теме не виден — берём графитовый оттенок
             return "#6b6f8a" if (hue == "white" and light) else icons.NEON[hue]
 
-        for entry in self.RAIL_SECTIONS:
+        sections = list(self.RAIL_SECTIONS)
+        if self.session is not None and self.session.is_admin:
+            sections.append(("admin", "shield", "red", "Админка",
+                             "Пользователи, ключи, логи, сервер", "view"))
+        for entry in sections:
             if entry is None:                       # тонкий разделитель групп
                 tk.Frame(self.rail, bg=p["border_soft"], height=1,
                          width=28).pack(pady=6)
@@ -264,6 +277,9 @@ class App:
             ("theme", "Тема", "Светлая / тёмная", self.toggle_theme, False, "orange"),
             ("settings", "Настройки", "Тема, анимации, обновления",
              self.show_settings, False, "violet"),
+            *([("user", "Личный кабинет",
+                f"{self.session.username} · лицензия, устройства, пароль",
+                self.open_account, False, "pink")] if self.session is not None else []),
             ("update", "Обновление", "", self._on_update_click, True, "lime"),
             ("help", "О программе", "Версия, горячие клавиши, что нового",
              self.show_about, False, "cyan"),
@@ -274,11 +290,12 @@ class App:
                              tooltip=f"{title}\n{desc}" if desc else title,
                              pulse=pulse, hue=color)
             btn.pack(pady=2)
-            self.rail_buttons[kind] = btn
+            self.rail_buttons["account" if kind == "user" else kind] = btn
             warm += [(kind, 24, neon_color(color, p["text_dim"], g), g)
                      for g in NEON_LEVELS]
 
         tk.Frame(self.rail, bg=p["bg"], height=10).pack()
+        self._rail_meta["account"] = ("account", "user", "pink", "Личный кабинет", "", "view")
 
         # кнопка обновления скрыта по умолчанию
         if "update" in self.rail_buttons:
@@ -1737,6 +1754,7 @@ class App:
                     win32clipboard.CloseClipboard()
 
                 self.set_status("Коллаж скопирован в буфер обмена")
+                self.track("export_copy", w=img.width, h=img.height)
                 return True
             except Exception as e:
                 return f"Ошибка копирования:\n{e}"
@@ -1828,6 +1846,8 @@ class App:
             name = os.path.basename(save_path)
             try:
                 self.save_btn.burst()            # искры успеха
+                self.track("export_save", w=img.width, h=img.height,
+                           photos=sum(1 for x in self.photos if x))
             except Exception:
                 pass
             self.set_status(
@@ -2020,7 +2040,59 @@ class App:
         self.root.bind("<Control-Z>", lambda e: self.redo())
         self.root.bind("<Control-y>", lambda e: self.redo())
 
+    def _on_tk_error(self, exc, val, tb):
+        import traceback
+        traceback.print_exception(exc, val, tb)
+        # только тип и короткое сообщение — без путей к файлам пользователя
+        self.track("error", kind=exc.__name__, msg=str(val).split("\n")[0][:60])
+
+    # ------------------------------------------------------------ аккаунт
+    def track(self, event, **data):
+        """Событие использования (если вход включён; иначе — ничего не делает)."""
+        if self.session is not None:
+            try:
+                self.session.track(event, **data)
+            except Exception:
+                pass
+
+    def _session_watch(self):
+        """Раз в полчаса сверяемся с сервером: блокировка/отзыв лицензии
+        вступают в силу без перезапуска программы."""
+        if self.session is None or self.session.offline:
+            return
+
+        def work():
+            return self.session.api.refresh()
+
+        def done(resp):
+            self.session.apply(resp)
+            self.root.after(30 * 60 * 1000, self._session_watch)
+
+        def fail(e):
+            from .account.api import ApiError
+            if isinstance(e, ApiError) and e.code in (
+                    "banned", "device_removed", "token_invalid", "license_expired",
+                    "license_revoked", "license_none"):
+                messagebox.showwarning("Доступ закрыт", e.message + "\n\nПрограмма будет закрыта.")
+                self.on_close()
+            else:                                    # нет сети — попробуем позже
+                self.root.after(10 * 60 * 1000, self._session_watch)
+
+        self.run_task(work, done, fail)
+
+    def open_account(self):
+        self._set_section("account")
+
     def on_close(self):
+        if self.session is not None:
+            try:
+                self.track("app_exit")
+                from .account import store as _store
+                import time as _time
+                _store.touch_last_seen(int(_time.time()))
+                self.session.close()
+            except Exception:
+                pass
         try:
             if hasattr(self, "status_bar"):
                 self.status_bar.stop()
@@ -2039,7 +2111,20 @@ def run():
     except ImportError:
         root = tk.Tk()
         print("ℹ tkinterdnd2 не установлен — drag & drop будет отключён.")
-    app = App(root)
+
+    # ---- вход: включается, когда указан адрес сервера и есть открытый ключ ----
+    session = None
+    from .account import gate
+    if gate.enforced():
+        from .screens.login import LoginScreen
+        session = LoginScreen(root).run()
+        if session is None:                      # окно входа закрыли
+            try:
+                root.destroy()
+            except tk.TclError:
+                pass
+            return
+    app = App(root, session=session)
 
     # ярлык «Проверить обновления» из меню Пуск запускает программу с этим ключом
     if "--check-updates" in sys.argv:

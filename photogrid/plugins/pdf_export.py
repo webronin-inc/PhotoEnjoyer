@@ -32,6 +32,7 @@ def _export_single(app):
         img = app.apply_collage_hooks(img, for_preview=False)
         img.save(path, "PDF", resolution=150)
         app.set_status(f"PDF сохранён: {path}")
+        app.track("pdf_export", w=img.width, h=img.height)
         messagebox.showinfo("Готово", f"PDF сохранён:\n{path}")
     except Exception as e:
         messagebox.showerror("Ошибка", f"Не удалось сохранить PDF:\n{e}")

@@ -26,6 +26,9 @@ sys.path.insert(0, str(HERE))
 from photogrid import branding
 from photogrid.version import __version__
 
+sys.path.insert(0, str(HERE / "tools"))
+import codesign  # noqa: E402  (подпись кода, если заданы PE_SIGN_*)
+
 DIST      = HERE / "dist"
 BUILD     = HERE / "build"
 INSTALLER = HERE / "installer"
@@ -256,7 +259,12 @@ def main():
     clean()
     build_exe()
     cleanup_build_dir()
+    # сначала подписываем сам exe (он упаковывается в установщик), затем установщик
+    codesign.sign_files([DIST / EXE_NAME], description=branding.APP_NAME)
     has_installer = build_installer()
+    if has_installer:
+        codesign.sign_files([INSTALLER / f"{branding.APP_NAME}-Setup-{__version__}.exe"],
+                            description=f"{branding.APP_NAME} Setup")
     final_report(has_installer)
     print_manifest_snippet(has_installer)
 

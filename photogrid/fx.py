@@ -37,23 +37,38 @@ def dialog_in(top, dy=14, duration=240):
                           on_done=lambda: upd(1.0), key=(id(top), "dialog_in"))
 
 
+def _pady_of(w):
+    """Исходный вертикальный отступ pack-виджета как (верх, низ)."""
+    try:
+        v = w.pack_info().get("pady", 0)
+    except tk.TclError:
+        return (0, 0)
+    if isinstance(v, (tuple, list)):
+        parts = [int(x) for x in v]
+    elif isinstance(v, str):
+        parts = [int(float(x)) for x in v.split()] or [0]
+    else:
+        parts = [int(v)]
+    return (parts[0], parts[1] if len(parts) > 1 else parts[0])
+
+
 def stagger_rise(widgets, dy=28, step=90, duration=520):
     """Каскадное появление: блоки по очереди «выезжают» снизу вверх.
 
-    Работает для виджетов, размещённых через pack (меняет только верхний
-    отступ), поэтому раскладка остальных не страдает.
-    """
+    Работает для виджетов, размещённых через pack (меняется только верхний
+    отступ; исходные отступы возвращаются в конце)."""
     if not anim.effects_enabled():
         return
     for i, w in enumerate(widgets):
+        top0, bottom0 = _pady_of(w)
         try:
-            w.pack_configure(pady=(dy, 0))
+            w.pack_configure(pady=(top0 + dy, bottom0))
         except tk.TclError:
             continue
 
-        def upd(t, w=w):
+        def upd(t, w=w, top0=top0, bottom0=bottom0):
             try:
-                w.pack_configure(pady=(int(round(dy * (1 - t))), 0))
+                w.pack_configure(pady=(top0 + int(round(dy * (1 - t))), bottom0))
             except tk.TclError:
                 pass
 

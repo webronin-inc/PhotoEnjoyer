@@ -295,6 +295,7 @@ class _TemplateCard(tk.Canvas):
 
 
 def _apply_template(app, tpl):
+    app.track("template_apply", n=tpl.get("name", "")[:30])
     try:
         from ..config import LAYOUTS
         layout = tpl.get("layout", app.config["layout"])
