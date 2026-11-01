@@ -53,6 +53,7 @@ def _open_for_current(app):
 
 
 def open_editor(app, idx):
+    app.track("editor_open")
     win = getattr(app, "_photo_editor_win", None)
     try:
         if win is not None and win.top.winfo_exists():

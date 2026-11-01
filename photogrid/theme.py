@@ -231,6 +231,28 @@ def apply_theme(root, name="dark"):
                      ("borderWidth", 0), ("relief", "flat")):
         root.option_add(f"*TCombobox*Listbox.{key}", val)
 
+    # таблицы (админка, логи)
+    style.configure("Treeview", background=palette["surface_alt"],
+                    fieldbackground=palette["surface_alt"], foreground=palette["text"],
+                    bordercolor=palette["border"], lightcolor=palette["surface_alt"],
+                    darkcolor=palette["surface_alt"], rowheight=30, borderwidth=0,
+                    font=("Segoe UI", 10))
+    style.map("Treeview", background=[("selected", palette["accent"])],
+              foreground=[("selected", "#ffffff")])
+    style.configure("Treeview.Heading", background=palette["surface"],
+                    foreground=palette["text_dim"], relief="flat", borderwidth=0,
+                    font=("Segoe UI", 9, "bold"), padding=(8, 8))
+    style.map("Treeview.Heading", background=[("active", palette["surface_hi"])])
+
+    # полосы прокрутки в тон интерфейсу (clam по умолчанию светлый)
+    for orient in ("Vertical", "Horizontal"):
+        st = f"{orient}.TScrollbar"
+        style.configure(st, background=palette["surface_hi"], troughcolor=palette["surface_alt"],
+                        bordercolor=palette["surface_alt"], lightcolor=palette["surface_hi"],
+                        darkcolor=palette["surface_hi"], arrowcolor=palette["text_dim"],
+                        relief="flat", gripcount=0, arrowsize=12)
+        style.map(st, background=[("active", palette["border"]), ("pressed", palette["accent"])])
+
     style.configure("TScale",
                     background=palette["surface"],
                     troughcolor=palette["surface_alt"],

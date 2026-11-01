@@ -43,13 +43,13 @@ def pump(root, sec=0.2):
 
 
 def test_rail_has_all_sections_and_neon_hues(app):
-    for key in ("collage", "templates", "batch", "cloud", "editor", "tools",
+    for key in ("collage", "templates", "batch", "library", "editor", "tools",
                 "plugins", "theme", "settings", "help"):
         assert key in app.rail_buttons, key
     assert app.rail_buttons["templates"].hue == icons.NEON["pink"]
 
 
-@pytest.mark.parametrize("section", ["templates", "batch", "cloud", "plugins", "collage"])
+@pytest.mark.parametrize("section", ["templates", "batch", "library", "plugins", "collage"])
 def test_every_section_opens(app, section):
     app._set_section(section)
     pump(app.root, 0.25)
@@ -172,7 +172,7 @@ def test_status_counters_count_up(app):
 
 
 def test_rail_power_on_returns_to_rest(app):
-    btn = app.rail_buttons["cloud"]
+    btn = app.rail_buttons["library"]
     btn.power_on(0)
     pump(app.root, 1.2)
     assert btn._boost == 0.0
