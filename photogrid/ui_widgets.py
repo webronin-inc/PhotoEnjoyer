@@ -183,16 +183,65 @@ def style_dropdown(menu, palette):
 #  Логотип
 # ==============================================================
 class LogoMark(tk.Canvas):
-    def __init__(self, master, palette, size=40, letter="P", **kwargs):
-        super().__init__(
-            master, width=size, height=size,
-            bg=palette["bg"], highlightthickness=0, **kwargs,
-        )
-        s = size
-        rounded_rect(self, 0, 0, s, s, radius=int(s * 0.28),
-                     fill=palette["accent"], outline="")
-        self.create_text(s / 2, s / 2 + 1, text=letter, fill="#ffffff",
-                         font=("Segoe UI", int(s * 0.46), "bold"))
+    """Объёмный неоновый логотип. Свечение медленно «дышит» (только в режиме
+    полных анимаций, ~12 кадров/с из кэша готовых картинок — почти бесплатно)."""
+
+    def __init__(self, master, palette, size=40, letter="P", breathe=True, **kwargs):
+        pad = int(size * 0.16)
+        super().__init__(master, width=size + 2 * pad, height=size + 2 * pad,
+                         bg=palette["bg"], highlightthickness=0, **kwargs)
+        self.palette = palette
+        self._size = size
+        self._letter = letter
+        self._phase = 0.0
+        self._job = None
+        self._img = None
+        self._cache = {}
+        self._item = self.create_image(0, 0, anchor="nw")
+        self._show(1.0)
+        self.bind("<Destroy>", self._on_destroy, add="+")
+        if breathe:
+            self._job = self.after(900, self._tick)
+
+    def _show(self, glow):
+        g = round(glow * 4) / 4.0                       # 5 уровней — 5 картинок
+        img = self._cache.get(g)
+        if img is None:
+            img = icons.ImageTk.PhotoImage(
+                icons.logo_pil(self._size, self.palette["accent"], self._letter, g))
+            self._cache[g] = img
+        self._img = img
+        self.itemconfigure(self._item, image=img)
+
+    def _tick(self):
+        self._job = None
+        try:
+            if not self.winfo_exists():
+                return
+            if anim.effects_enabled() and self.winfo_ismapped():
+                self._phase = (self._phase + 0.012) % 1.0
+                self._show(0.55 + 0.75 * anim.pulse_curve(self._phase))
+            self._job = self.after(80, self._tick)
+        except tk.TclError:
+            pass
+
+    def _on_destroy(self, event):
+        if event.widget is self and self._job is not None:
+            try:
+                self.after_cancel(self._job)
+            except Exception:
+                pass
+            self._job = None
+
+
+NEON_LEVELS = (0.0, 0.25, 0.5, 0.75, 1.0, 1.25)
+
+
+def neon_color(hue, dim_src, glow):
+    """Цвет неоновой иконки для уровня свечения: выключена — приглушённая,
+    горит — полный оттенок. Зависит только от уровня (мало вариантов в кэше)."""
+    dim = _blend_hex(hue, dim_src, 0.62)
+    return _blend_hex(dim, hue, min(1.0, glow * 1.3))
 
 
 # ==============================================================
@@ -207,7 +256,7 @@ class RailButton(tk.Canvas):
     """
 
     def __init__(self, master, palette, kind, size=42,
-                 command=None, tooltip=None, pulse=False, **kwargs):
+                 command=None, tooltip=None, pulse=False, hue=None, **kwargs):
         super().__init__(
             master, width=size, height=size,
             bg=palette["bg"], highlightthickness=0,
@@ -215,6 +264,9 @@ class RailButton(tk.Canvas):
         )
         self.palette = palette
         self.kind = kind
+        self.hue = hue or icons.NEON["violet"]
+        self._flick = 1.0       # множитель яркости: «мерцание» при включении
+        self._boost = 0.0       # вспышка «включения вывески» при запуске
         self.size = size
         self._command = command
         self._hover = False
@@ -250,6 +302,8 @@ class RailButton(tk.Canvas):
             anim.tween_attr(self, "_av", 1.0 if active else 0.0,
                             duration=260, easing=anim.ease_out_back
                             if active else anim.ease_out_cubic)
+            if active and anim.effects_enabled():
+                self._start_flicker()
         else:
             self._redraw()
         if active and self._pulse_allowed:
@@ -260,6 +314,50 @@ class RailButton(tk.Canvas):
     def _set_hover(self, h):
         self._hover = h
         anim.tween_attr(self, "_hv", 1.0 if h else 0.0, duration=140)
+
+    # ---------- неоновое «мерцание» при включении ----------
+    _FLICKER = ((0.0, 0.15), (0.14, 1.0), (0.28, 0.30), (0.42, 1.0),
+                (0.56, 0.62), (0.72, 1.0), (1.0, 1.0))
+
+    def power_on(self, delay_ms=0):
+        """Неоновая «вывеска» загорается: вспышка с мерцанием, затем остывание
+        до обычного состояния. Вызывается каскадом при запуске программы."""
+        pts = self._FLICKER
+
+        def upd(t):
+            v = pts[-1][1]
+            for (t0, v0), (t1, v1) in zip(pts, pts[1:]):
+                if t <= t1:
+                    k = 0 if t1 == t0 else (t - t0) / (t1 - t0)
+                    v = v0 + (v1 - v0) * k
+                    break
+            self._boost = max(0.0, v * (1.0 - t) * 1.25)
+            self._redraw()
+
+        def done():
+            self._boost = 0.0
+            self._redraw()
+
+        anim.get(self).animate(900, upd, on_done=done, easing=anim.linear,
+                               delay_ms=delay_ms, key=(id(self), "power_on"))
+
+    def _start_flicker(self):
+        pts = self._FLICKER
+
+        def upd(t):
+            for (t0, v0), (t1, v1) in zip(pts, pts[1:]):
+                if t <= t1:
+                    k = 0 if t1 == t0 else (t - t0) / (t1 - t0)
+                    self._flick = v0 + (v1 - v0) * k
+                    break
+            self._redraw()
+
+        def done():
+            self._flick = 1.0
+            self._redraw()
+
+        anim.get(self).animate(520, upd, on_done=done, easing=anim.linear,
+                               key=(id(self), "flick"))
 
     # ---------- пульсация ----------
     def _start_pulse(self):
@@ -337,9 +435,13 @@ class RailButton(tk.Canvas):
             rounded_rect(self, 0, cx - half, 3, cx + half, radius=1,
                          fill=p["accent"], outline="")
 
-        color = _blend_hex(p["accent_hi"], p["text_dim"], av1) if av1 > hv \
-            else _blend_hex(p["text"], p["text_dim"], hv)
-        draw_icon(self, self.kind, cx, cx, size=22, color=color)
+        # неоновая трубка: выключена — тусклая и «объёмная», наведение — светится
+        # вполсилы, активна — горит (с лёгким перебросом при включении)
+        glow = round(min(1.25, max(av * self._flick, hv * 0.55,
+                                   self._boost)) * 4) / 4.0
+        icons.draw_neon(self, self.kind, cx, cx, size=24,
+                        color=neon_color(self.hue, p["text_dim"], glow),
+                        glow=glow)
 
 
 # ==============================================================
@@ -355,6 +457,11 @@ class GradientButton(tk.Canvas):
         self._hover = False
         self._hv = 0.0
         self._pressed = False
+        self._ripple = None          # (x, y, t) — волна от места клика
+        self._ripple_img = None
+        self._burst_t = None         # искры «успеха»
+        self._burst_pts = []
+        self._mask_cache = None
 
         import tkinter.font as tkfont
         try:
@@ -386,7 +493,72 @@ class GradientButton(tk.Canvas):
 
     def _on_press(self, e):
         self._pressed = True
+        self._start_ripple(e.x, e.y)
         self._redraw()
+
+    # ---------- эффекты (только в режиме полных анимаций) ----------
+    def _start_ripple(self, x, y):
+        if not anim.effects_enabled():
+            return
+
+        def upd(t):
+            self._ripple = (x, y, t)
+            self._redraw()
+
+        def done():
+            self._ripple = None
+            self._redraw()
+
+        anim.get(self).animate(560, upd, on_done=done, easing=anim.ease_out_cubic,
+                               key=(id(self), "ripple"))
+
+    def burst(self):
+        """Праздничные искры — например, после успешного сохранения."""
+        if not anim.effects_enabled():
+            return
+        import random
+        w = max(int(self["width"]), self.winfo_width())
+        h = int(self["height"])
+        hues = list(icons.NEON.values())
+        self._burst_pts = [
+            (w * random.uniform(0.15, 0.85), h / 2,
+             random.uniform(-1.0, 1.0), random.uniform(-1.4, -0.35),
+             random.uniform(2.0, 4.2), random.choice(hues))
+            for _ in range(22)]
+
+        def upd(t):
+            self._burst_t = t
+            self._redraw()
+
+        def done():
+            self._burst_t = None
+            self._burst_pts = []
+            self._redraw()
+
+        anim.get(self).animate(800, upd, on_done=done, easing=anim.linear,
+                               key=(id(self), "burst"))
+
+    def _round_mask(self, w, h):
+        if self._mask_cache is None or self._mask_cache[0] != (w, h):
+            from PIL import Image, ImageDraw
+            m = Image.new("L", (w, h), 0)
+            ImageDraw.Draw(m).rounded_rectangle((0, 0, w - 1, h - 1), radius=12, fill=255)
+            self._mask_cache = ((w, h), m)
+        return self._mask_cache[1]
+
+    def _draw_ripple(self, w, h):
+        x, y, t = self._ripple
+        from PIL import Image, ImageDraw
+        r = (0.15 + t) * max(w, h) * 0.9
+        a = int(255 * 0.30 * (1 - t))
+        layer = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(layer).ellipse((x - r, y - r, x + r, y + r), fill=a)
+        from PIL import ImageChops
+        layer = ImageChops.multiply(layer, self._round_mask(w, h))
+        img = Image.new("RGBA", (w, h), (255, 255, 255, 0))
+        img.putalpha(layer)
+        self._ripple_img = icons.ImageTk.PhotoImage(img)
+        self.create_image(0, 0, image=self._ripple_img, anchor="nw")
 
     def _on_release(self, e):
         was = self._pressed
@@ -413,6 +585,10 @@ class GradientButton(tk.Canvas):
         inset = 1 if self._pressed else 0       # лёгкое «нажатие»
         rounded_rect(self, inset, inset, w - inset, h - inset, radius=12,
                      fill=color, outline="")
+        if self._hv > 0.02:                     # светящаяся кромка при наведении
+            rounded_rect(self, inset, inset, w - inset, h - inset, radius=12,
+                         fill="", outline=_blend_hex("#ffffff", color,
+                                                     0.35 * self._hv), width=1)
 
         cx = 18
         cy = h / 2 + inset
@@ -421,6 +597,17 @@ class GradientButton(tk.Canvas):
             cx += 30
         self.create_text(cx, cy, text=self.text, fill="#ffffff",
                          font=("Segoe UI", 10, "bold"), anchor="w")
+
+        if self._ripple is not None and w > 2 and h > 2:
+            self._draw_ripple(w, h)
+        if self._burst_t is not None:
+            t = self._burst_t
+            for (x0, y0, vx, vy, size, hue) in self._burst_pts:
+                x = x0 + vx * 60 * t
+                y = y0 + (vy * 70 * t) + 90 * t * t        # «гравитация»
+                r = size * (1 - t * 0.6)
+                col = _blend_hex(hue, color, 1 - t * 0.8)
+                self.create_oval(x - r, y - r, x + r, y + r, fill=col, outline="")
 
 
 # ==============================================================
@@ -754,7 +941,11 @@ class Slot(tk.Canvas):
             cx, cy = w / 2, h / 2
             color = _blend_hex(p["accent"], p["text_faint"], hv)
             lift = 3 * hv                               # плюс «подпрыгивает»
-            draw_icon(self, "plus", cx, cy - 22 - lift, size=26, color=color)
+            # неоновый плюс: «включается» при наведении
+            glow = round(min(1.0, hv * 1.1) * 4) / 4.0
+            icons.draw_neon(self, "plus", cx, cy - 22 - lift, size=26,
+                            color=neon_color(icons.NEON["violet"], p["text_faint"], glow),
+                            glow=glow)
             tc = _blend_hex(p["text"], p["text_dim"], hv)
             self.create_text(cx, cy + 30, text=f"Фото {self.index + 1}",
                              fill=tc, font=("Segoe UI", 10))
@@ -972,6 +1163,7 @@ class AnimatedStatusBar(tk.Canvas):
         self._progress = None
         self._pre_progress_state = "ready"
         self._metrics = []
+        self._shown = {}        # отображаемые (анимируемые) значения счётчиков
 
         self._phase = 0.0
         self._wave_pos = 0.0
@@ -1029,6 +1221,18 @@ class AnimatedStatusBar(tk.Canvas):
     def set_metrics(self, metrics):
         self._metrics = list(metrics)
 
+    def _advance_counters(self):
+        """Числа плавно «докручиваются» до нового значения (count-up)."""
+        for k, v in self._metrics:
+            if not isinstance(v, (int, float)):
+                continue
+            cur = self._shown.get(k, v)
+            if anim.effects_enabled():
+                nxt = cur + (v - cur) * 0.35
+                self._shown[k] = v if abs(v - nxt) < 0.05 else nxt
+            else:
+                self._shown[k] = v
+
     def stop(self):
         self._running = False
         if self._job is not None:
@@ -1075,6 +1279,7 @@ class AnimatedStatusBar(tk.Canvas):
                 ring.step()
             self._rings = [r for r in self._rings if not r.dead]
 
+            self._advance_counters()
             self._redraw()
             self._error_count = 0
 
@@ -1251,9 +1456,14 @@ class AnimatedStatusBar(tk.Canvas):
         if self._metrics:
             x = w - 16
             for label, value in reversed(self._metrics):
+                shown = self._shown.get(label, value)
+                moving = isinstance(value, (int, float)) and abs(shown - value) > 0.05
+                text = str(int(round(shown))) if isinstance(value, (int, float)) \
+                    else str(value)
                 self.create_text(
-                    x, cy, text=str(value), anchor="e",
-                    fill=p["text"], font=("Segoe UI", 9, "bold"),
+                    x, cy, text=text, anchor="e",
+                    fill=p["accent_hi"] if moving else p["text"],
+                    font=("Segoe UI", 9, "bold"),
                 )
                 value_w = max(20, len(str(value)) * 7 + 4)
                 self.create_text(
@@ -1266,8 +1476,9 @@ class AnimatedStatusBar(tk.Canvas):
 # ==============================================================
 #  SegmentedControl — переключатель «один из N» (вместо радиокнопок)
 # ==============================================================
-class SegmentedControl(tk.Frame):
-    """Сегментированный переключатель.
+class SegmentedControl(tk.Canvas):
+    """Сегментированный переключатель с «ползунком», который плавно переезжает
+    к выбранному пункту (с лёгким пружинящим эффектом).
 
     options — список (значение, подпись) или (значение, подпись, иконка).
     Можно связать с tk.StringVar (variable) — тогда он синхронизируется в
@@ -1277,8 +1488,8 @@ class SegmentedControl(tk.Frame):
     def __init__(self, master, palette, options, value=None, variable=None,
                  command=None, font_size=9, padx=12, pady=5, icon_size=15,
                  **kwargs):
+        import tkinter.font as tkfont
         p = palette
-        super().__init__(master, bg=p["surface_alt"], padx=2, pady=2, **kwargs)
         self.p = p
         self.command = command
         self.variable = variable
@@ -1286,42 +1497,68 @@ class SegmentedControl(tk.Frame):
         self._font = ("Segoe UI", font_size)
         self._icon_size = icon_size
         self._value = None
-        self._cells = {}
         self._hover = None
         self._trace_id = None
+        self._pad = 2
 
+        f = tkfont.Font(font=self._font)
+        self._cells = {}                 # значение → (x0, x1, подпись, иконка)
+        x = self._pad
         for val, label, icon in self._opts:
-            cell = tk.Label(self, text=label, font=self._font, cursor="hand2",
-                            padx=padx, pady=pady, bd=0)
+            w = f.measure(label) + 2 * padx if label else 0
             if icon:
-                cell.configure(compound="left")
-            cell.pack(side=tk.LEFT, padx=(0, 2))
-            cell.bind("<Button-1>", lambda e, v=val: self._choose(v))
-            cell.bind("<Enter>", lambda e, v=val: self._set_hover(v))
-            cell.bind("<Leave>", lambda e, v=val: self._set_hover(None))
-            self._cells[val] = (cell, icon)
+                w += icon_size + (6 if label else 0)
+                w = max(w, icon_size + 2 * padx) if not label else w
+            self._cells[val] = (x, x + w, label, icon)
+            x += w + 2
+        self._total_w = x - 2 + self._pad
+        self._h = max(f.metrics("linespace"), icon_size) + 2 * pady + 2 * self._pad
+
+        super().__init__(master, width=self._total_w, height=self._h,
+                         bg=p["surface"], highlightthickness=0,
+                         cursor="hand2", **kwargs)
+        first = self._opts[0][0]
+        self._tx, self._tw = self._cells[first][0], self._cells[first][1] - self._cells[first][0]
+        self.bind("<Button-1>", self._on_click)
+        self.bind("<Motion>", self._on_motion)
+        self.bind("<Leave>", lambda e: self._set_hover(None))
 
         if variable is not None:
             self._trace_id = variable.trace_add(
                 "write", lambda *a: self._from_variable())
             self.bind("<Destroy>", self._on_destroy, add="+")
-            self._from_variable()
+            self._from_variable(initial=True)
         else:
-            self.set(value if value is not None else self._opts[0][0])
+            self.set(value if value is not None else first, animate=False)
 
     # ---- публичный API
     def get(self):
         return self._value
 
-    def set(self, value, notify=False):
+    def set(self, value, notify=False, animate=True):
         if value not in self._cells:
             return
         self._value = value
-        self._restyle()
+        x0, x1, _, _ = self._cells[value]
+        self._move_thumb(x0, x1 - x0, animate)
         if notify and self.command:
             self.command(value)
 
     # ---- внутреннее
+    def _cell_at(self, x):
+        for val, (x0, x1, _, _) in self._cells.items():
+            if x0 <= x <= x1 + 1:
+                return val
+        return None
+
+    def _on_click(self, e):
+        v = self._cell_at(e.x)
+        if v is not None:
+            self._choose(v)
+
+    def _on_motion(self, e):
+        self._set_hover(self._cell_at(e.x))
+
     def _choose(self, value):
         if value == self._value:
             return
@@ -1331,36 +1568,77 @@ class SegmentedControl(tk.Frame):
         if self.command:
             self.command(value)
 
-    def _from_variable(self):
+    def _from_variable(self, initial=False):
         try:
             v = self.variable.get()
         except Exception:
             return
-        if v in self._cells and v != self._value:
-            self._value = v
-            self._restyle()
+        if v in self._cells and (initial or v != self._value):
+            self.set(v, animate=not initial)
 
     def _set_hover(self, value):
-        self._hover = value
-        self._restyle()
+        if value != self._hover:
+            self._hover = value
+            self._redraw()
 
-    def _restyle(self):
-        p = self.p
-        for val, (cell, icon) in self._cells.items():
-            try:
-                if val == self._value:
-                    bg, fg = p["accent"], "#ffffff"
-                elif val == self._hover:
-                    bg, fg = p["surface_hi"], p["text"]
+    def _move_thumb(self, x, w, animate):
+        sx, sw = self._tx, self._tw
+        if not animate or (abs(sx - x) < 0.5 and abs(sw - w) < 0.5):
+            self._tx, self._tw = x, w
+            self._redraw()
+            return
+
+        def upd(t):
+            self._tx = sx + (x - sx) * t
+            self._tw = sw + (w - sw) * t
+            self._redraw()
+
+        anim.get(self).animate(260, upd, easing=anim.ease_out_back,
+                               on_done=lambda: upd(1.0),
+                               key=(id(self), "thumb"))
+
+    def _redraw(self):
+        try:
+            self.delete("all")
+        except tk.TclError:
+            return
+        p, pad, h = self.p, self._pad, self._h
+        rounded_rect(self, 0, 0, self._total_w, h, radius=9,
+                     fill=p["surface_alt"], outline="")
+        # ползунок: мягкое свечение + сама плашка
+        tx, tw = self._tx, self._tw
+        # пружинный перелёт не должен вылезать за дорожку
+        lo, hi = pad, self._total_w - pad
+        right = min(hi, tx + tw)
+        tx = max(lo, tx)
+        tw = max(4, right - tx)
+        rounded_rect(self, tx - 1, pad - 1, tx + tw + 1, h - pad + 1, radius=8,
+                     fill=_blend_hex(p["accent"], p["surface_alt"], 0.25), outline="")
+        rounded_rect(self, tx, pad, tx + tw, h - pad, radius=7,
+                     fill=p["accent"], outline="")
+        cy = h / 2
+        for val, (x0, x1, label, icon) in self._cells.items():
+            # доля ячейки, закрытая ползунком, → плавная смена цвета текста
+            over = max(0.0, min(x1, tx + tw) - max(x0, tx)) / max(1.0, x1 - x0)
+            idle = p["text"] if val == self._hover else p["text_dim"]
+            col = _blend_hex("#ffffff", idle, min(1.0, over * 1.2))
+            cx = (x0 + x1) / 2
+            if icon:
+                isz = self._icon_size
+                if label:
+                    tw_ = self._text_w(label)
+                    start = cx - (isz + 6 + tw_) / 2
+                    icons.draw(self, icon, start + isz / 2, cy, size=isz, color=col)
+                    self.create_text(start + isz + 6, cy, text=label, anchor="w",
+                                     fill=col, font=self._font)
                 else:
-                    bg, fg = p["surface_alt"], p["text_dim"]
-                cell.configure(bg=bg, fg=fg)
-                if icon:
-                    img = icons.tk_icon(icon, self._icon_size, fg)
-                    cell.configure(image=img)
-                    cell._img = img
-            except tk.TclError:
-                return
+                    icons.draw(self, icon, cx, cy, size=isz, color=col)
+            else:
+                self.create_text(cx, cy, text=label, fill=col, font=self._font)
+
+    def _text_w(self, label):
+        import tkinter.font as tkfont
+        return tkfont.Font(font=self._font).measure(label)
 
     def _on_destroy(self, event):
         if event.widget is self and self._trace_id is not None:

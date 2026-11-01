@@ -11,6 +11,7 @@ from tkinter import colorchooser, ttk
 from PIL import Image, ImageDraw, ImageOps, ImageTk
 
 from .. import caption_render as cr
+from .. import fx
 from .. import icons
 from ..ui_widgets import (
     ChipToggle, ColorSwatch, GradientButton, GradientSlider, SegmentedControl,
@@ -122,6 +123,7 @@ class CaptionDialog:
         rx, ry = app.root.winfo_rootx(), app.root.winfo_rooty()
         rw, rh = app.root.winfo_width(), app.root.winfo_height()
         top.geometry(f"+{max(0, rx + (rw - w) // 2)}+{max(0, ry + (rh - h) // 3)}")
+        fx.dialog_in(top)
 
     # ------------------------------------------------------------ левая часть
     def _build_left(self, parent):

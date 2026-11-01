@@ -5,6 +5,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from .. import branding
+from .. import fx
 from .. import updater
 from ..version import __version__
 
@@ -82,7 +83,7 @@ class _UpdateDialog:
         self.p = app.palette
         self._installing = False
 
-        self.top = tk.Toplevel(app.root)
+        self.top = fx.toplevel(app.root)
         self.top.title(f"Обновление — {branding.APP_NAME}")
         self.top.configure(bg=self.p["surface"])
         self.top.geometry("680x740")

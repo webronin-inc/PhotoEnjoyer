@@ -3,6 +3,8 @@
 import os
 import threading
 import tkinter as tk
+
+from .. import fx
 from tkinter import filedialog, messagebox, ttk
 
 from ..config import IMAGE_EXTS, layout_cells
@@ -20,7 +22,7 @@ class _BatchDialog:
         self.stop_flag = False
         p = app.palette
 
-        self.top = tk.Toplevel(app.root)
+        self.top = fx.toplevel(app.root)
         self.top.title("Пакетная обработка")
         self.top.configure(bg=p["surface"])
         self.top.geometry("640x600")

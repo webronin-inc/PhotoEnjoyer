@@ -13,13 +13,13 @@ from tkinter import filedialog, messagebox, colorchooser
 from PIL import Image, ImageTk
 
 from .config import Config, LAYOUTS, IMAGE_EXTS, DEFAULTS
-from . import anim, branding, icons
+from . import anim, branding, fx, hotkeys, icons, popup
 from .toast import ToastManager
 from .core import build_collage
 from .theme import apply_theme, DARK, LIGHT
 from .ui_widgets import (
     HoverButton, Slot, LogoMark, IconButton, ColorSwatch,
-    SegmentedControl, CaptionEntry,
+    SegmentedControl, CaptionEntry, neon_color, NEON_LEVELS,
     RailButton, GradientButton, GradientSlider, Tooltip, style_dropdown,
     AnimatedStatusBar,
 )
@@ -84,7 +84,7 @@ class App:
         self._task_poll = None
         self._tasks_running = 0
 
-        anim.set_enabled(self.config["animations"])
+        anim.set_level(self.config["anim_level"])
 
         self.layout_var  = tk.StringVar(value=self.config["layout"])
         self.mode_var    = tk.StringVar(value=self.config["mode"])
@@ -196,68 +196,117 @@ class App:
     # ==================================================================
     #  РЕЛЬС
     # ==================================================================
+    # ключ, значок, неоновый оттенок, заголовок, описание, тип
+    # тип: view — раздел в основной области, action — действие, flyout — меню
+    RAIL_SECTIONS = (
+        ("collage", "collage", "violet", "Коллаж",
+         "Фото, раскладка и предпросмотр", "view"),
+        ("templates", "template", "pink", "Шаблоны",
+         "Готовые и свои стили оформления", "view"),
+        ("batch", "layers", "orange", "Пакетная обработка",
+         "Сразу много папок — в коллажи", "view"),
+        ("cloud", "cloud", "blue", "Облако",
+         "Проекты и коллажи онлайн", "view"),
+        None,
+        ("editor", "edit", "cyan", "Редактор фото",
+         "Фильтры, обрезка, рисование · Ctrl+E", "action"),
+        ("tools", "tools", "lime", "Инструменты",
+         "Подписи, водяной знак, PDF и другое", "flyout"),
+        ("plugins", "plugins", "white", "Плагины",
+         "Что подключено и какие есть действия", "view"),
+    )
+
+    _SECTION_BUILDERS = {
+        "plugins": ("screens.plugins", "build_plugins_view"),
+        "batch": ("screens.batch", "build_batch_view"),
+        "templates": ("screens.templates", "build_templates_view"),
+        "cloud": ("screens.cloud", "build_cloud_view"),
+    }
+
     def _build_rail(self):
         p = self.palette
 
         logo_wrap = tk.Frame(self.rail, bg=p["bg"])
-        logo_wrap.pack(pady=(20, 24))
-        logo = LogoMark(logo_wrap, p, size=42, letter="P")
+        logo_wrap.pack(pady=(12, 8))
+        logo = LogoMark(logo_wrap, p, size=40, letter="P")
         logo.pack()
         Tooltip(logo, branding.APP_NAME, p)
 
-        # разделы (верх)
-        sections = [
-            ("collage", "Коллаж", "Собрать коллаж из фото"),
-            ("plugins", "Плагины", "Загруженные плагины и их действия"),
-            ("batch",   "Пакетная обработка", "Обработать сразу много папок"),
-            ("cloud",   "Облако", "Экспорт в облако (скоро)"),
-        ]
-        for key, tip, desc in sections:
-            btn = RailButton(self.rail, p, kind=key, size=42,
+        warm = []
+        self._rail_meta = {}
+        bg = p["bg"].lstrip("#")
+        light = (int(bg[0:2], 16) * 299 + int(bg[2:4], 16) * 587
+                 + int(bg[4:6], 16) * 114) / 1000 > 150
+
+        def hue_color(hue):
+            # «белый» неон на светлой теме не виден — берём графитовый оттенок
+            return "#6b6f8a" if (hue == "white" and light) else icons.NEON[hue]
+
+        for entry in self.RAIL_SECTIONS:
+            if entry is None:                       # тонкий разделитель групп
+                tk.Frame(self.rail, bg=p["border_soft"], height=1,
+                         width=28).pack(pady=6)
+                continue
+            key, kind, hue, title, desc, typ = entry
+            self._rail_meta[key] = entry
+            color = hue_color(hue)
+            btn = RailButton(self.rail, p, kind=kind, size=42, hue=color,
                              command=lambda k=key: self._set_section(k),
-                             tooltip=tip)
-            btn.pack(pady=3)
+                             tooltip=f"{title}\n{desc}")
+            btn.pack(pady=2)
             self.rail_buttons[key] = btn
+            warm += [(kind, 24, neon_color(color, p["text_dim"], g), g)
+                     for g in NEON_LEVELS]
 
         tk.Frame(self.rail, bg=p["bg"]).pack(fill=tk.BOTH, expand=True)
 
-        # разделы (низ)
         bottom = [
-            ("theme",    "Тема",         self.toggle_theme,   False),
-            ("settings", "Настройки",    self.show_settings,  False),
-            ("update",   "Обновление",   self._on_update_click, True),
-            ("help",     "Справка",      self.show_about,     False),
+            ("theme", "Тема", "Светлая / тёмная", self.toggle_theme, False, "orange"),
+            ("settings", "Настройки", "Тема, анимации, обновления",
+             self.show_settings, False, "violet"),
+            ("update", "Обновление", "", self._on_update_click, True, "lime"),
+            ("help", "О программе", "Версия, горячие клавиши, что нового",
+             self.show_about, False, "cyan"),
         ]
-        for kind, tip, cmd, pulse in bottom:
-            btn = RailButton(self.rail, p, kind=kind, size=42,
-                             command=cmd, tooltip=tip, pulse=pulse)
-            btn.pack(pady=3)
+        for kind, title, desc, cmd, pulse, hue in bottom:
+            color = hue_color(hue)
+            btn = RailButton(self.rail, p, kind=kind, size=42, command=cmd,
+                             tooltip=f"{title}\n{desc}" if desc else title,
+                             pulse=pulse, hue=color)
+            btn.pack(pady=2)
             self.rail_buttons[kind] = btn
+            warm += [(kind, 24, neon_color(color, p["text_dim"], g), g)
+                     for g in NEON_LEVELS]
 
-        tk.Frame(self.rail, bg=p["bg"], height=16).pack()
+        tk.Frame(self.rail, bg=p["bg"], height=10).pack()
 
         # кнопка обновления скрыта по умолчанию
         if "update" in self.rail_buttons:
             self.rail_buttons["update"].pack_forget()
 
+        icons.warm_neon(warm)           # готовим неон в фоне, чтобы не тормозило
+        if anim.effects_enabled():      # вывеска «включается» по очереди
+            for i, btn in enumerate(self.rail_buttons.values()):
+                btn.power_on(delay_ms=350 + 90 * i)
         self._set_section("collage")
 
     def _set_section(self, key):
-        if key == "cloud":
-            messagebox.showinfo(
-                "Скоро",
-                "Облачный экспорт появится в следующем обновлении."
-            )
+        meta = getattr(self, "_rail_meta", {}).get(key)
+        typ = meta[5] if meta else "view"
+        if typ == "action":
+            self._rail_action(key)
+            return
+        if typ == "flyout":
+            self._rail_flash(key)
+            self._open_tools_menu(key)
             return
 
-        if key in ("plugins", "batch") and key not in self.views:
+        if key in self._SECTION_BUILDERS and key not in self.views:
+            import importlib
+            modname, func = self._SECTION_BUILDERS[key]
             try:
-                if key == "plugins":
-                    from .screens.plugins import build_plugins_view
-                    self.views[key] = build_plugins_view(self.content, self)
-                elif key == "batch":
-                    from .screens.batch import build_batch_view
-                    self.views[key] = build_batch_view(self.content, self)
+                mod = importlib.import_module("." + modname, __package__)
+                self.views[key] = getattr(mod, func)(self.content, self)
             except Exception as e:
                 messagebox.showerror(
                     "Ошибка",
@@ -277,8 +326,70 @@ class App:
                 self._rise_in(target)
 
         for k, btn in self.rail_buttons.items():
+            if k in self._rail_meta and self._rail_meta[k][5] != "view":
+                continue                      # действия/меню не «залипают»
             btn.set_active(k == key)
         self.active_section = key
+
+    def _rail_flash(self, key):
+        btn = self.rail_buttons.get(key)
+        if btn is not None and anim.effects_enabled():
+            btn._start_flicker()
+
+    def _rail_action(self, key):
+        self._rail_flash(key)
+        if key == "editor":
+            try:
+                from .plugins import photo_editor
+                photo_editor._open_for_current(self)
+            except Exception as e:
+                self.set_status(f"Редактор недоступен: {e}")
+
+    # значки для пунктов меню «Инструменты» по ключевым словам названия
+    _TOOL_ICONS = (("подпис", "caption"), ("водян", "eye"), ("pdf", "download"),
+                   ("шаблон", "template"), ("редактор", "edit"),
+                   ("редактир", "edit"),
+                   ("обрез", "edit"), ("буфер", "clipboard"),
+                   ("пакет", "layers"), ("обнов", "refresh"),
+                   ("сохран", "save"), ("загруз", "folder"),
+                   ("откры", "folder"))
+
+    def _tool_icon(self, label):
+        low = label.lower()
+        for word, icon in self._TOOL_ICONS:
+            if word in low:
+                return icon
+        return "wand"
+
+    def _open_tools_menu(self, key="tools"):
+        """Меню «Инструменты»: собирается из действий, которые зарегистрировали
+        плагины, — поэтому всегда актуально."""
+        btn = self.rail_buttons.get(key)
+        x = (btn.winfo_rootx() + btn.winfo_width() + 6) if btn else 80
+        y = btn.winfo_rooty() if btn else 120
+        items, seen = [], set()
+        known = ("Файл", "Правка", "Вид", "Справка")
+        groups = list(known) + [g for g in self.plugin_actions if g not in known]
+        for g in groups:
+            # шаблоны вынесены в отдельный раздел рельса — здесь не дублируем
+            acts = [a for a in self.plugin_actions.get(g, [])
+                    if a["label"] not in seen
+                    and "шаблон" not in a["label"].lower()]
+            if not acts:
+                continue
+            if items:
+                items.append("-")
+            items.append({"title": g})
+            for a in acts:
+                seen.add(a["label"])
+                items.append({
+                    "label": a["label"], "command": a["command"],
+                    "icon": self._tool_icon(a["label"]),
+                    "shortcut": a.get("accelerator") or "",
+                })
+        if not items:
+            items = [{"label": "Нет доступных действий", "enabled": False}]
+        popup.show(self.root, self.palette, items, x, y, min_width=250)
 
     def _rise_in(self, widget):
         """Раздел «всплывает» снизу вверх за ~220 мс."""
@@ -398,9 +509,9 @@ class App:
                    tooltip="Подписи: стиль, шрифт, быстрые действия"
                    ).pack(side=tk.RIGHT)
 
-        hint_text = ("Клик — выбрать / swap · Двойной — заменить\n"
-                     "Ctrl/Shift+клик — отметить · Del — удалить отмеченные\n"
-                     "ПКМ — действия · перетащите файлы")
+        hint_text = ("Клик — выбрать · два клика подряд — поменять местами\n"
+                     "Двойной клик — заменить · ПКМ — меню слота\n"
+                     "Ctrl+клик — отметить · перетащите фото прямо сюда")
         tk.Label(left, text=hint_text, bg=p["surface"], fg=p["text_dim"],
                  font=("Segoe UI", 8), justify="left"
                  ).pack(fill=tk.X, padx=18, pady=(0, 8))
@@ -528,10 +639,11 @@ class App:
         btnbox = tk.Frame(mid, bg=p["surface"])
         btnbox.pack(fill=tk.X, padx=20, pady=(16, 20), side=tk.BOTTOM)
 
-        GradientButton(
+        self.save_btn = GradientButton(
             btnbox, p, text="Сохранить как…", icon="save", height=44,
             command=lambda: self.combine_and_save(force_dialog=True),
-        ).pack(fill=tk.X, pady=(0, 8))
+        )
+        self.save_btn.pack(fill=tk.X, pady=(0, 8))
 
         copy_btn = tk.Button(btnbox, text="Копировать в буфер",
                              image=icons.tk_icon("copy", 18, p["text_dim"], 10),
@@ -585,6 +697,8 @@ class App:
     # ==================================================================
     #  СЛОТЫ
     # ==================================================================
+        fx.stagger_rise([left_outer, mid_outer, right_outer])
+
     def _build_slots(self):
         p = self.palette
         for w in self.slots_grid.winfo_children():
@@ -670,7 +784,7 @@ class App:
         if opener:
             opener()
         else:
-            self.set_status("Плагин подписей не загружен")
+            self.set_status("Подписи недоступны: плагин не загружен")
 
     def _on_caption_var_change(self, idx, var):
         """Реагирует на ввод в поле подписи слота."""
@@ -882,7 +996,7 @@ class App:
         targets = sorted(i for i in self.marked
                          if i < len(self.photos) and self.photos[i] is not None)
         if not targets:
-            self.set_status("Нет отмеченных фото")
+            self.set_status("Сначала отметьте фото (Ctrl+клик)")
             return 0
         self._push_undo("Массовое удаление")
         for i in targets:
@@ -927,62 +1041,45 @@ class App:
             self._deselect()
 
     def on_slot_context_menu(self, event, idx):
-        p = self.palette
-        menu = tk.Menu(self.root, tearoff=0)
-        style_dropdown(menu, p)
-
         has_photo = (idx < len(self.photos)) and (self.photos[idx] is not None)
-        state = "normal" if has_photo else "disabled"
-
-        menu.add_command(label="Заменить фото…",
-                         command=lambda: self.on_slot_replace(idx),
-                         state=state)
-        menu.add_command(label="Убрать",
-                         command=lambda: self.on_slot_clear(idx),
-                         state=state)
-        menu.add_separator()
-        menu.add_command(label="Повернуть вправо 90°",
-                         command=lambda: self.rotate_slot(idx, 90),
-                         state=state)
-        menu.add_command(label="Повернуть влево 90°",
-                         command=lambda: self.rotate_slot(idx, -90),
-                         state=state)
-        menu.add_command(label="Отразить по горизонтали",
-                         command=lambda: self.flip_slot(idx, "h"),
-                         state=state)
-        menu.add_command(label="Отразить по вертикали",
-                         command=lambda: self.flip_slot(idx, "v"),
-                         state=state)
-        menu.add_separator()
-        menu.add_command(label="Открыть в проводнике",
-                         command=lambda: self.reveal_in_explorer(idx),
-                         state=state)
-        menu.add_command(label="Скопировать путь к файлу",
-                         command=lambda: self.copy_slot_path(idx),
-                         state=state)
-
-        menu.add_separator()
-        menu.add_command(
-            label=("Снять отметку" if idx in self.marked
-                   else "Отметить для удаления"),
-            command=lambda: self._mark_click(idx), state=state)
+        T = {"enabled": has_photo}
+        items = [
+            {"label": "Заменить фото…", "icon": "image", **T,
+             "command": lambda: self.on_slot_replace(idx)},
+            {"label": "Убрать из слота", "icon": "close", **T,
+             "command": lambda: self.on_slot_clear(idx)},
+            "-",
+            {"label": "Повернуть вправо 90°", "icon": "refresh", **T,
+             "command": lambda: self.rotate_slot(idx, 90)},
+            {"label": "Повернуть влево 90°", "icon": "refresh", **T,
+             "command": lambda: self.rotate_slot(idx, -90)},
+            {"label": "Отразить по горизонтали", "icon": "shuffle", **T,
+             "command": lambda: self.flip_slot(idx, "h")},
+            {"label": "Отразить по вертикали", "icon": "shuffle", **T,
+             "command": lambda: self.flip_slot(idx, "v")},
+            "-",
+            {"label": "Показать в проводнике", "icon": "folder", **T,
+             "command": lambda: self.reveal_in_explorer(idx)},
+            {"label": "Скопировать путь к файлу", "icon": "copy", **T,
+             "command": lambda: self.copy_slot_path(idx)},
+            "-",
+            {"label": ("Снять отметку" if idx in self.marked
+                       else "Отметить для удаления"),
+             "icon": "check", **T, "command": lambda: self._mark_click(idx)},
+        ]
         if self.marked:
-            menu.add_command(label=f"Удалить отмеченные ({len(self.marked)})",
-                             command=self.delete_marked)
-
+            items.append({"label": f"Удалить отмеченные ({len(self.marked)})",
+                          "icon": "delete", "danger": True,
+                          "command": self.delete_marked})
         extra = [a for a in self.slot_actions
                  if has_photo or not a.get("needs_photo", True)]
         if extra:
-            menu.add_separator()
+            items.append("-")
             for act in extra:
-                menu.add_command(
-                    label=act["label"],
-                    command=lambda a=act: a["command"](idx))
-
-        try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
+                items.append({"label": act["label"],
+                              "icon": self._tool_icon(act["label"]),
+                              "command": lambda a=act: a["command"](idx)})
+        popup.show(self.root, self.palette, items, event.x_root, event.y_root)
 
     def on_slot_clear(self, idx):
         if idx < len(self.photos) and self.photos[idx] is not None:
@@ -1115,7 +1212,7 @@ class App:
 
     def undo(self):
         if not self._undo_stack:
-            self.set_status("Нечего отменять")
+            self.set_status("Отменять пока нечего")
             return
         cfg_keys = ("layout", "mode", "cell_size", "border",
                     "border_color", "bg_color", "quality")
@@ -1132,7 +1229,7 @@ class App:
 
     def redo(self):
         if not self._redo_stack:
-            self.set_status("Нечего повторять")
+            self.set_status("Повторять пока нечего")
             return
         cfg_keys = ("layout", "mode", "cell_size", "border",
                     "border_color", "bg_color", "quality")
@@ -1308,7 +1405,7 @@ class App:
         for k, v in DEFAULTS.items():
             if k != "theme":
                 self.config[k] = v
-        anim.set_enabled(self.config["animations"])
+        anim.set_level(self.config["anim_level"])
         self._sync_vars_from_config()
 
     def toggle_theme(self):
@@ -1397,7 +1494,7 @@ class App:
         except Exception as e:
             print(f"reload_ui: не удалось восстановить значок обновления: {e}")
 
-        self.set_status("Тема применена")
+        self.set_status("Тема переключена")
 
     def _choose_border_color(self):
         color = colorchooser.askcolor(color=self.config["border_color"],
@@ -1690,7 +1787,7 @@ class App:
             self.last_save_path = save_path
 
         if self._saving:
-            self.set_status("Сохранение уже идёт…")
+            self.set_status("Подождите — сохранение ещё идёт…")
             return
         self._saving = True
         self.set_status("Сохранение…")
@@ -1729,6 +1826,10 @@ class App:
                 self.status_bar.set_progress(1.0)
                 self.root.after(500, lambda: self.status_bar.set_progress(None))
             name = os.path.basename(save_path)
+            try:
+                self.save_btn.burst()            # искры успеха
+            except Exception:
+                pass
             self.set_status(
                 f"Сохранено: {name}  ({img.width}×{img.height}, {size_mb:.2f} МБ)")
             self.toasts.show(
@@ -1843,35 +1944,12 @@ class App:
                 pass
 
     def show_hotkeys(self):
-        messagebox.showinfo(
-            "Горячие клавиши",
-            "Ctrl+O  — выбрать фото\n"
-            "Ctrl+S  — сохранить\n"
-            "Ctrl+Shift+S  — сохранить как…\n"
-            "Ctrl+Shift+C  — копировать коллаж в буфер\n"
-            "Ctrl+Z  — отменить\n"
-            "Ctrl+Y  — повторить\n"
-            "Ctrl+,  — настройки\n"
-            "F5      — обновить предпросмотр\n"
-            "Escape  — снять отметки / выделение слота\n"
-            "Ctrl+A  — отметить все фото\n"
-            "Delete  — убрать отмеченные фото (или выделенное)\n"
-            "Ctrl+E  — редактор фото (выделенный слот)\n\n"
-            "Мышь:\n"
-            "Клик по пустому слоту   — выбрать файл\n"
-            "Клик по двум слотам     — swap\n"
-            "Ctrl/Shift+клик         — отметить для удаления\n"
-            "Двойной клик            — заменить фото\n"
-            "ПКМ по слоту            — контекстное меню"
-        )
+        from .screens import about
+        about.show_hotkeys(self)
 
     def show_about(self):
-        from . import branding
-        messagebox.showinfo(
-            f"О программе — {branding.APP_NAME}",
-            branding.about_text()
-            + "\n\nПлагины: " + (", ".join(self.plugin_flags.keys()) or "нет")
-        )
+        from .screens import about
+        about.show_about(self)
 
     # ==================================================================
     #  API ДЛЯ ПЛАГИНОВ
@@ -1927,6 +2005,7 @@ class App:
     #  ПРОЧЕЕ
     # ==================================================================
     def _bind_shortcuts(self):
+        hotkeys.install(self.root)      # Ctrl+… работает на любой раскладке
         self.root.bind("<Control-o>", lambda e: self.choose_photos_dialog())
         self.root.bind("<Control-s>", lambda e: self.combine_and_save(force_dialog=False))
         self.root.bind("<Control-S>", lambda e: self.combine_and_save(force_dialog=True))

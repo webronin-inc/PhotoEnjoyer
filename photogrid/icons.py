@@ -129,6 +129,12 @@ ICONS = {
     "menu": [("L", [(4, 6.5), (20, 6.5)]), ("L", [(4, 12), (20, 12)]),
              ("L", [(4, 17.5), (20, 17.5)])],
     # --- для подписей и интерфейса
+    "template": [("R", 3, 3.5, 18, 17, 2.4), ("L", [(3, 9.5), (21, 9.5)]),
+                 ("L", [(10, 9.5), (10, 20.5)])],
+    "tools": [("L", [(14.5, 4.2), (19.8, 9.5), (16.2, 13.1), (10.9, 7.8)]),
+              ("L", [(14.5, 4.2), (11.5, 2.8), (8.2, 6.1), (9.6, 9.1)]),
+              ("L", [(15.2, 12.4), (5.4, 20.6)]),
+              ("L", [(9.2, 8.5), (16.2, 15.5)])],
     "caption": [("R", 3, 3.5, 18, 17, 2.4), ("L", [(7, 16.2), (17, 16.2)]),
                 ("L", [(7, 12.2), (13, 12.2)])],
     "text": [("L", [(5, 7), (5, 4.5), (19, 4.5), (19, 7)]),
@@ -271,6 +277,25 @@ def _hex_to_rgb(color):
 
 
 # ------------------------------------------------------------- Tk-слой
+import itertools
+import tkinter as _tk
+
+_epoch_counter = itertools.count(1)
+
+
+def _epoch():
+    """Номер текущего Tk-интерпретатора. PhotoImage привязан к интерпретатору,
+    поэтому кэш картинок разделяется по «эпохам» (важно для тестов и для
+    повторного создания окна: старая картинка в новом окне — ошибка Tcl)."""
+    root = getattr(_tk, "_default_root", None)
+    if root is None:
+        return 0
+    e = getattr(root, "_pe_epoch", None)
+    if e is None:
+        e = root._pe_epoch = next(_epoch_counter)
+    return e
+
+
 _tk_cache = {}
 _TK_CACHE_MAX = 1200
 
@@ -283,13 +308,13 @@ def tk_icon(kind, size, color, pad_right=0):
     """
     r, g, b = _hex_to_rgb(color)
     q = lambda v: min(255, (v + 2) // 4 * 4)          # шаг 4 — незаметно глазу
-    key = (kind, int(size), q(r), q(g), q(b), int(pad_right))
+    key = (_epoch(), kind, int(size), q(r), q(g), q(b), int(pad_right))
     img = _tk_cache.get(key)
     if img is None:
         if len(_tk_cache) >= _TK_CACHE_MAX:
             for old in list(_tk_cache)[:_TK_CACHE_MAX // 4]:
                 _tk_cache.pop(old, None)
-        pil = pil_icon(kind, size, "#%02x%02x%02x" % key[2:5])
+        pil = pil_icon(kind, size, "#%02x%02x%02x" % key[3:6])
         if pad_right:
             wide = Image.new("RGBA", (pil.width + int(pad_right), pil.height),
                              (0, 0, 0, 0))
@@ -327,3 +352,263 @@ def contact_sheet(size=48, cols=8, color="#e6e6ef", bg="#18181f"):
         sheet.paste(ic, (x + (cell - size) // 2, y + 6), ic)
         d.text((x + 4, y + size + 12), n, fill="#8a8aa0")
     return sheet
+
+
+# ==============================================================
+#  3D-неон: светящаяся «трубка» с объёмом
+# ==============================================================
+NEON = {                      # яркие оттенки, одинаково читаются на любой теме
+    "violet": "#a07bff", "cyan": "#23e5ff", "pink": "#ff4fd8",
+    "lime": "#86ff6b", "orange": "#ffa23d", "blue": "#4f8bff",
+    "red": "#ff5470", "white": "#e9ecff",
+}
+
+_NSS = 2                      # суперсэмплинг неона
+
+
+def _mix(c1, c2, t):
+    t = max(0.0, min(1.0, t))
+    return tuple(int(round(a + (b - a) * t)) for a, b in zip(c1, c2))
+
+
+def neon_pil(kind, size, color, glow=1.0, extrude=True):
+    """RGBA-картинка (size + 2·отступ) квадратная; отступ вмещает свечение.
+
+    glow 0 — «выключенная» трубка (только объём), 1 — горит, >1 — ярче.
+    """
+    return neon_from_mask(mask(kind, int(size) * _NSS), int(size), color,
+                          glow, extrude)
+
+
+def neon_from_mask(m_small, size, color, glow=1.0, extrude=True):
+    """Неон по готовой маске размера size·_NSS (иконка, буква логотипа…)."""
+    size = int(size)
+    pad = max(4, int(round(size * 0.30)))
+    total = size + 2 * pad
+    T = total * _NSS
+    base = _hex_to_rgb(color)
+    glow = max(0.0, float(glow))
+
+    M = Image.new("L", (T, T), 0)
+    M.paste(m_small, (pad * _NSS, pad * _NSS))
+
+    out = Image.new("RGBA", (T, T), base + (0,))
+
+    # --- свечение: два размытия разного радиуса
+    if glow > 0.02:
+        r1 = max(1.0, size * _NSS * 0.075)
+        r2 = max(2.0, size * _NSS * 0.19)
+        g = ImageChops.add(M.filter(ImageFilter.GaussianBlur(r1)).point(lambda v: min(255, int(v * 1.0))),
+                           M.filter(ImageFilter.GaussianBlur(r2)).point(lambda v: min(255, int(v * 1.1))))
+        g = g.point(lambda v: min(255, int(v * 0.85 * min(glow, 1.6))))
+        layer = Image.new("RGBA", (T, T), base + (0,))
+        layer.putalpha(g)
+        out = Image.alpha_composite(out, layer)
+
+    # --- объём: сдвинутые тёмные копии позади (выдавливание вниз-вправо)
+    if extrude:
+        depth = max(1, int(round(size * _NSS * 0.055)))
+        dark = _mix(base, (8, 6, 24), 0.62)
+        for i in range(depth, 0, -1):
+            sh = ImageChops.offset(M, int(round(i * 0.55)), i)
+            t = i / depth
+            col = _mix(dark, _mix(base, (8, 6, 24), 0.35), 1 - t)
+            lay = Image.new("RGBA", (T, T), col + (0,))
+            lay.putalpha(sh)
+            out = Image.alpha_composite(out, lay)
+
+    # --- лицевая грань: вертикальный градиент (светлее сверху) — «цилиндр»
+    top = _mix(base, (255, 255, 255), 0.42 * min(1.0, 0.35 + glow))
+    bot = _mix(base, (0, 0, 20), 0.20 * (1.2 - min(1.0, glow)) + 0.05)
+    grad = Image.new("RGB", (1, T))
+    for y in range(T):
+        grad.putpixel((0, y), _mix(top, bot, y / (T - 1)))
+    face = grad.resize((T, T)).convert("RGBA")
+    face.putalpha(M)
+    out = Image.alpha_composite(out, face)
+
+    # --- раскалённая сердцевина трубки (светлая линия по центру штриха)
+    k = max(3, int(size * _NSS * 0.10) | 1)
+    core_m = M.filter(ImageFilter.MinFilter(k)).filter(ImageFilter.GaussianBlur(0.6))
+    core_col = _mix(base, (255, 255, 255), 0.55 + 0.35 * min(1.0, glow))
+    core = Image.new("RGBA", (T, T), core_col + (0,))
+    core.putalpha(core_m.point(lambda v: int(v * (0.55 + 0.45 * min(1.0, glow)))))
+    out = Image.alpha_composite(out, core)
+
+    # --- глянцевый блик по верхне-левой кромке
+    edge = ImageChops.subtract(M, ImageChops.offset(M, max(1, _NSS), max(1, _NSS)))
+    hl = Image.new("RGBA", (T, T), (255, 255, 255, 0))
+    hl.putalpha(edge.point(lambda v: int(v * 0.55)))
+    out = Image.alpha_composite(out, hl)
+
+    return out.resize((total, total), Image.LANCZOS)
+
+
+_neon_cache = {}
+_neon_pil_cache = {}          # готовые PIL-картинки (их греет фоновый поток)
+
+
+def _neon_key(kind, size, color, glow, extrude=True):
+    r, g, b = _hex_to_rgb(color)
+    q = lambda v: min(255, (v + 4) // 8 * 8)
+    gq = round(max(0.0, glow) * 4) / 4.0                  # шаг 0.25
+    return (kind, int(size), q(r), q(g), q(b), gq, bool(extrude))
+
+
+def tk_neon(kind, size, color, glow=1.0, extrude=True):
+    """PhotoImage неоновой иконки; цвет и свечение квантуются для кэша."""
+    key = _neon_key(kind, size, color, glow, extrude)
+    tkey = (_epoch(),) + key
+    img = _neon_cache.get(tkey)
+    if img is None:
+        if len(_neon_cache) >= 400:
+            for old in list(_neon_cache)[:100]:
+                _neon_cache.pop(old, None)
+        pil = _neon_pil_cache.get(key)
+        if pil is None:
+            pil = neon_pil(kind, size, "#%02x%02x%02x" % key[2:5],
+                           glow=key[5], extrude=extrude)
+            _neon_pil_cache[key] = pil
+        img = ImageTk.PhotoImage(pil)
+        _neon_cache[tkey] = img
+    return img
+
+
+def warm_neon(specs):
+    """Рендерит неон заранее в фоновом потоке.
+
+    specs — список (kind, size, color, glow). Создание PhotoImage остаётся в
+    главном потоке (в tk_neon), здесь только Pillow — это безопасно.
+    """
+    import threading
+
+    def work():
+        for kind, size, color, glow in specs:
+            key = _neon_key(kind, size, color, glow)
+            if key in _neon_pil_cache:
+                continue
+            try:
+                _neon_pil_cache[key] = neon_pil(
+                    kind, size, "#%02x%02x%02x" % key[2:5], glow=key[5])
+            except Exception:
+                pass
+
+    threading.Thread(target=work, daemon=True).start()
+
+
+def neon_pad(size):
+    """Отступ, который неон добавляет вокруг иконки (для расчёта раскладки)."""
+    return max(4, int(round(int(size) * 0.30)))
+
+
+def draw_neon(canvas, kind, cx, cy, size=24, color="#a07bff", glow=1.0):
+    """Рисует неоновую иконку по центру (cx, cy) и держит ссылку на картинку."""
+    img = tk_neon(kind, size, color, glow)
+    refs = getattr(canvas, "_neon_refs", None)
+    if refs is None:
+        refs = canvas._neon_refs = []
+    refs.append(img)
+    if len(refs) > 6:
+        del refs[:-6]
+    return canvas.create_image(cx, cy, image=img, anchor="center")
+
+
+def neon_sheet(size=44, cols=8, glow=1.0, bg="#10101a"):
+    """Лист-образец неоновых иконок (для проверки глазами)."""
+    names = ["collage", "template", "layers", "cloud", "edit", "tools", "plugins",
+             "settings", "help", "caption", "wand", "copy", "sun", "refresh",
+             "folder", "eye"]
+    hues = list(NEON.values())
+    cell = size + 2 * neon_pad(size) + 24
+    rows = (len(names) + cols - 1) // cols
+    sheet = Image.new("RGB", (cols * cell, rows * cell), bg)
+    for i, n in enumerate(names):
+        ic = neon_pil(n, size, hues[i % len(hues)], glow=glow)
+        x, y = (i % cols) * cell, (i // cols) * cell
+        sheet.paste(ic, (x + (cell - ic.width) // 2, y + 8), ic)
+    return sheet
+
+
+# ==============================================================
+#  Логотип приложения: объёмная неоновая плитка с буквой
+# ==============================================================
+def _vgrad(size, top, bottom):
+    g = Image.new("RGB", (1, size))
+    for y in range(size):
+        g.putpixel((0, y), _mix(top, bottom, y / max(1, size - 1)))
+    return g.resize((size, size))
+
+
+def logo_pil(size=256, accent="#7c6cff", letter="P", glow=1.0):
+    """Квадратный логотип с запасом под свечение (размер плитки = size)."""
+    from .caption_render import load_font
+    pad = int(size * 0.16)
+    total = size + 2 * pad
+    S = 2                                           # суперсэмплинг
+    T, tile = total * S, size * S
+    base = _hex_to_rgb(accent)
+    r = int(tile * 0.27)
+    off = pad * S
+
+    plate = Image.new("L", (T, T), 0)
+    ImageDraw.Draw(plate).rounded_rectangle(
+        (off, off, off + tile - 1, off + tile - 1), radius=r, fill=255)
+
+    out = Image.new("RGBA", (T, T), base + (0,))
+    # свечение вокруг плитки
+    halo = plate.filter(ImageFilter.GaussianBlur(tile * 0.07)).point(
+        lambda v: int(v * 0.75 * min(1.4, glow)))
+    layer = Image.new("RGBA", (T, T), base + (0,)); layer.putalpha(halo)
+    out = Image.alpha_composite(out, layer)
+
+    # «толщина» плитки: тёмная копия, сдвинутая вниз
+    thick = max(2, int(tile * 0.035))
+    for i in range(thick, 0, -1):
+        sh = ImageChops.offset(plate, 0, i)
+        lay = Image.new("RGBA", (T, T), _mix(base, (6, 4, 20), 0.6) + (0,))
+        lay.putalpha(sh)
+        out = Image.alpha_composite(out, lay)
+
+    # лицо плитки: диагональ-подобный вертикальный градиент
+    face = _vgrad(T, _mix(base, (255, 255, 255), 0.30),
+                  _mix(base, (10, 6, 40), 0.40)).convert("RGBA")
+    face.putalpha(plate)
+    out = Image.alpha_composite(out, face)
+
+    # верхний глянец
+    gloss = Image.new("L", (T, T), 0)
+    ImageDraw.Draw(gloss).ellipse(
+        (off - tile * 0.2, off - tile * 0.78, off + tile * 1.2, off + tile * 0.52),
+        fill=255)
+    gloss = ImageChops.multiply(gloss.filter(ImageFilter.GaussianBlur(tile * 0.01)), plate)
+    gl = Image.new("RGBA", (T, T), (255, 255, 255, 0))
+    gl.putalpha(gloss.point(lambda v: int(v * 0.20)))
+    out = Image.alpha_composite(out, gl)
+
+    # фаска: светлая кромка сверху, тёмная снизу
+    inner = plate.filter(ImageFilter.MinFilter(max(3, int(tile * 0.02) | 1)))
+    rim = ImageChops.subtract(plate, inner)
+    up = ImageChops.multiply(rim, ImageChops.subtract(plate, ImageChops.offset(plate, 0, max(2, S * 2))))
+    rl = Image.new("RGBA", (T, T), (255, 255, 255, 0)); rl.putalpha(up.point(lambda v: int(v * 0.8)))
+    out = Image.alpha_composite(out, rl)
+
+    # буква: белая «трубка» с неоном и объёмом
+    font = load_font(int(tile * 0.62), "Segoe UI", bold=True)
+    gm = Image.new("L", (T, T), 0)
+    gd = ImageDraw.Draw(gm)
+    bb = gd.textbbox((0, 0), letter, font=font)
+    gw, gh = bb[2] - bb[0], bb[3] - bb[1]
+    gd.text((off + (tile - gw) / 2 - bb[0], off + (tile - gh) / 2 - bb[1] - tile * 0.01),
+            letter, font=font, fill=255)
+    # тень под буквой
+    shadow = ImageChops.offset(gm, 0, int(tile * 0.03)).filter(ImageFilter.GaussianBlur(tile * 0.02))
+    sl = Image.new("RGBA", (T, T), (8, 4, 40, 0)); sl.putalpha(shadow.point(lambda v: int(v * 0.55)))
+    out = Image.alpha_composite(out, sl)
+    for i in range(max(1, int(tile * 0.02)), 0, -1):
+        lay = Image.new("RGBA", (T, T), _mix(base, (0, 0, 30), 0.55) + (0,))
+        lay.putalpha(ImageChops.offset(gm, 0, i))
+        out = Image.alpha_composite(out, lay)
+    gface = _vgrad(T, (255, 255, 255), _mix((255, 255, 255), base, 0.35)).convert("RGBA")
+    gface.putalpha(gm)
+    out = Image.alpha_composite(out, gface)
+    return out.resize((total, total), Image.LANCZOS)

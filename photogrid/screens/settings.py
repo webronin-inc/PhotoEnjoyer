@@ -7,6 +7,7 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 
 from .. import branding, updater
+from .. import fx
 from ..version import __version__, __release_date__
 
 
@@ -20,7 +21,7 @@ class SettingsDialog:
         self.config = app.config
         self.p = app.palette
 
-        self.top = tk.Toplevel(app.root)
+        self.top = fx.toplevel(app.root)
         self.top.title(f"Настройки — {branding.APP_NAME}")
         self.top.configure(bg=self.p["surface"])
         self.top.geometry("580x720")
@@ -107,14 +108,20 @@ class SettingsDialog:
                  font=("Segoe UI", 8), anchor="w"
                  ).pack(fill=tk.X, padx=24, pady=(0, 8))
 
-        self.anim_var = tk.BooleanVar(value=bool(self.config.get("animations", True)))
-        ttk.Checkbutton(body, text="Анимации интерфейса",
-                        variable=self.anim_var).pack(
-            anchor="w", padx=24, pady=(0, 2))
-        tk.Label(body, text="Плавные переходы, появление фото, уведомления. "
-                            "Отключите на слабом компьютере.",
-                 bg=p["surface"], fg=p["text_faint"],
-                 font=("Segoe UI", 8), anchor="w"
+        from ..ui_widgets import SegmentedControl
+        self.anim_var = tk.StringVar(value=self.config.get("anim_level", "full"))
+        row = tk.Frame(body, bg=p["surface"])
+        row.pack(fill=tk.X, padx=24, pady=(0, 4))
+        tk.Label(row, text="Анимации", bg=p["surface"], fg=p["text"],
+                 font=("Segoe UI", 10)).pack(side=tk.LEFT)
+        SegmentedControl(row, p, [("full", "Полные"), ("soft", "Мягкие"),
+                                  ("off", "Выкл")],
+                         variable=self.anim_var).pack(side=tk.RIGHT)
+        tk.Label(body, text="Полные — все эффекты: неон, частицы, рябь. "
+                            "Мягкие — быстрее и без декора. Выкл — для слабого "
+                            "компьютера.",
+                 bg=p["surface"], fg=p["text_faint"], justify="left",
+                 wraplength=500, font=("Segoe UI", 8), anchor="w"
                  ).pack(fill=tk.X, padx=24, pady=(0, 8))
 
         # ============ ОБНОВЛЕНИЯ ============
@@ -350,9 +357,11 @@ class SettingsDialog:
         u = self.config.data.setdefault("updates", {})
         u["auto_check"] = bool(self.auto_check_var.get())
         u["auto_install_plugins"] = bool(self.auto_plugins_var.get())
-        self.config["animations"] = bool(self.anim_var.get())
+        level = self.anim_var.get()
+        self.config["anim_level"] = level
+        self.config["animations"] = level != "off"
         from .. import anim
-        anim.set_enabled(self.config["animations"])
+        anim.set_level(level)
         self.config.save()
 
     def _save(self):

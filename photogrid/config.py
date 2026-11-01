@@ -13,7 +13,8 @@ DEFAULTS = {
     "bg_color": "#ffffff",
     "quality": 92,
     "theme": "dark",                # dark | light
-    "animations": True,             # анимации интерфейса
+    "animations": True,             # анимации интерфейса (старый флаг)
+    "anim_level": "full",           # full | soft | off
 }
 
 LAYOUTS = {
@@ -62,6 +63,7 @@ class Config:
             return
         if not isinstance(saved, dict):
             return
+        saved_keys = set(saved)
 
         # Раньше подхватывались только ключи из DEFAULTS, из-за чего
         # настройки плагинов (watermark, updates…) терялись при перезапуске.
@@ -88,6 +90,11 @@ class Config:
             self.data["mode"] = DEFAULTS["mode"]
         if self.data["theme"] not in ("dark", "light"):
             self.data["theme"] = DEFAULTS["theme"]
+        if self.data.get("anim_level") not in ("full", "soft", "off"):
+            self.data["anim_level"] = "full"
+        # миграция: раньше был только флажок «анимации» — выключенный = off
+        if "anim_level" not in saved_keys and not self.data.get("animations", True):
+            self.data["anim_level"] = "off"
 
     def save(self):
         try:
