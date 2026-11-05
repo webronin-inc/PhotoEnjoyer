@@ -12,6 +12,7 @@ def _shell(app, title, width=420):
     top.configure(bg=p["surface"])
     top.transient(app.root)
     top.resizable(False, False)
+    top.minsize(width, 120)               # диалог не должен быть «узкой щелью»
     top.bind("<Escape>", lambda e: top.destroy())
     wrap = tk.Frame(top, bg=p["surface"])
     wrap.pack(padx=28, pady=22)

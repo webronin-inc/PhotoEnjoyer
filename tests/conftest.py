@@ -33,3 +33,19 @@ def pytest_terminal_summary(terminalreporter):
             terminalreporter.write_line(
                 f"::error title={_esc('pytest: ' + rep.nodeid)}::"
                 f"{_esc((where + ' ' + msg)[:1500])}")
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _reset_animation_level():
+    """Уровень анимаций — глобальная настройка: тест, который её меняет, не должен
+    влиять на соседние (раньше это маскировалось порядком запуска)."""
+    try:
+        from photogrid import anim
+        anim.set_level("full")
+        yield
+        anim.set_level("full")
+    except ImportError:
+        yield
