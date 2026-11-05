@@ -24,13 +24,32 @@ class SettingsDialog:
         self.top = fx.toplevel(app.root)
         self.top.title(f"Настройки — {branding.APP_NAME}")
         self.top.configure(bg=self.p["surface"])
-        self.top.geometry("580x720")
+        w, h = 580, 720
+        try:                                    # по центру главного окна
+            app.root.update_idletasks()
+            x = app.root.winfo_rootx() + max(0, (app.root.winfo_width() - w) // 2)
+            y = app.root.winfo_rooty() + max(0, (app.root.winfo_height() - h) // 3)
+            self.top.geometry(f"{w}x{h}+{x}+{y}")
+        except tk.TclError:
+            self.top.geometry(f"{w}x{h}")
         self.top.resizable(False, False)
         self.top.transient(app.root)
-        self.top.grab_set()
         self.top.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        self._build()
+        try:
+            self._build()
+        except Exception:
+            self.top.destroy()                  # недостроенное окно не должно
+            raise                               # оставаться и блокировать программу
+        # модальность включаем, только когда окно построено и показано
+        self.top.after(80, self._grab)
+
+    def _grab(self):
+        try:
+            if self.top.winfo_exists() and self.top.winfo_viewable():
+                self.top.grab_set()
+        except tk.TclError:
+            pass
 
     # ==========================================================
     def _build(self):
