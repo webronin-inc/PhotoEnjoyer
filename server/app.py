@@ -37,7 +37,8 @@ MAX_PACK_BYTES = 8 * 1024 * 1024
 ESSENTIAL_EVENTS = {"app_start", "app_exit", "login", "error"}
 USAGE_EVENTS = {"export_save", "export_copy", "batch_run", "template_apply",
                 "library_install", "caption_style", "editor_open", "pdf_export",
-                "watermark_apply"}
+                "watermark_apply", "hub_open", "module_open", "word_check", "word_declined",
+                "word_download", "word_install", "word_launch", "word_error"}
 ALL_EVENTS = ESSENTIAL_EVENTS | USAGE_EVENTS | {"register", "key_activated"}
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.\-]{3,24}$")
@@ -537,6 +538,20 @@ class App:
             con.commit()
             return 200, data, {"Content-Type": "application/zip", "X-Sha256": row["sha256"]}
 
+        @r("GET", API + "/software/word")
+        def software_word(req, con):
+            """Описание установщика Word. Подписано ключом сервера: программа
+            проверяет подпись, поэтому подмена на пути или на файловом хосте
+            не заставит её запустить чужой файл."""
+            self.auth(req, con)
+            pkg = load_word_package(con)
+            if not pkg or not pkg.get("enabled"):
+                raise HttpError(404, "not_configured", "Установщик Word ещё не загружен на сервер")
+            now = db.now()
+            token = security.sign_token(self.priv, {"v": 1, "kind": "word", "iat": now,
+                                                    "exp": now + 3600, "pkg": pkg})
+            return {"manifest": token, "server_time": now}
+
         self._register_admin_routes()
 
     # ------------------------------------------------------------ лицензии
@@ -821,7 +836,8 @@ class App:
         @r("GET", A + "/settings")
         def settings_get(req, con):
             adm(req, con)
-            return {"settings": db.get_settings(con)}
+            return {"settings": {k: v for k, v in db.get_settings(con).items()
+                                 if k in db.DEFAULT_SETTINGS}}
 
         @r("POST", A + "/settings")
         def settings_set(req, con):
@@ -835,7 +851,23 @@ class App:
                     db.set_setting(con, k, str(v)[:300])
             self.audit(con, req, "settings", ",".join(k for k in b if k in db.DEFAULT_SETTINGS))
             con.commit()
-            return {"settings": db.get_settings(con)}
+            return {"settings": {k: v for k, v in db.get_settings(con).items()
+                                 if k in db.DEFAULT_SETTINGS}}
+
+        @r("GET", A + "/software/word")
+        def word_get(req, con):
+            adm(req, con)
+            return {"package": load_word_package(con) or default_word_package()}
+
+        @r("POST", A + "/software/word")
+        def word_set(req, con):
+            adm(req, con)
+            pkg = validate_word_package(req.json())
+            db.set_setting(con, "software_word", json.dumps(pkg, ensure_ascii=False))
+            self.audit(con, req, "software.word", pkg["filename"],
+                       f"{pkg['url'][:80]} enabled={pkg['enabled']}")
+            con.commit()
+            return {"package": pkg}
 
         @r("POST", A + "/library")
         def library_upload(req, con):
@@ -924,6 +956,75 @@ def validate_pack(data):
     return {"id": meta["id"], "name": name, "description": str(meta.get("description", ""))[:300],
             "author": str(meta.get("author", ""))[:60], "version": str(meta.get("version", "1"))[:12],
             "kind": "templates", "templates": clean}
+
+
+WORD_FILE_RE = re.compile(r"^[A-Za-z0-9._\- ]{1,80}\.(exe|msi)$", re.I)
+SHA_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+
+def default_word_package():
+    return {"enabled": False, "target": "Word 2021", "match": ["2021"], "url": "",
+            "sha256": "", "size": 0, "filename": "", "args": [], "config_xml": "", "notes": ""}
+
+
+def _is_safe_url(url):
+    """Установщик грузится только по HTTPS (http — лишь для localhost при отладке)."""
+    if len(url) > 500 or any(c in url for c in " \t\r\n\"'<>"):
+        return False
+    if url.startswith("https://") and len(url) > 12:
+        return True
+    return bool(re.match(r"^http://(127\.0\.0\.1|localhost)(:\d+)?/", url))
+
+
+def validate_word_package(b):
+    """Проверка описания установщика, которое вводит администратор."""
+    pkg = default_word_package()
+    pkg["enabled"] = bool(b.get("enabled"))
+    pkg["target"] = str(b.get("target", "Word 2021")).strip()[:40] or "Word 2021"
+    match = b.get("match", ["2021"])
+    if isinstance(match, str):
+        match = [m.strip() for m in match.split(",")]
+    match = [str(m).strip() for m in match if str(m).strip()]
+    if not 1 <= len(match) <= 5 or any(not 2 <= len(m) <= 30 for m in match):
+        raise HttpError(400, "bad_package", "«Признак версии»: от 1 до 5 значений по 2–30 символов")
+    pkg["match"] = match
+    pkg["url"] = str(b.get("url", "")).strip()
+    pkg["sha256"] = str(b.get("sha256", "")).strip().lower()
+    pkg["filename"] = str(b.get("filename", "")).strip()
+    pkg["notes"] = str(b.get("notes", ""))[:300]
+    try:
+        pkg["size"] = int(b.get("size", 0) or 0)
+    except (TypeError, ValueError):
+        raise HttpError(400, "bad_package", "Размер — число байт")
+    if not 0 <= pkg["size"] <= 40 * 1024 ** 3:
+        raise HttpError(400, "bad_package", "Размер вне допустимого диапазона")
+    args = b.get("args", [])
+    if isinstance(args, str):
+        args = [a for a in args.split() if a]
+    if not isinstance(args, list) or len(args) > 20 or any(
+            not isinstance(a, str) or len(a) > 200 or any(ord(c) < 32 for c in a) for a in args):
+        raise HttpError(400, "bad_package", "Аргументы запуска: до 20 строк без управляющих символов")
+    pkg["args"] = args
+    pkg["config_xml"] = str(b.get("config_xml", ""))[:20000]
+    if pkg["enabled"] or pkg["url"]:
+        if not _is_safe_url(pkg["url"]):
+            raise HttpError(400, "bad_package", "Ссылка должна начинаться с https://")
+        if not SHA_RE.match(pkg["sha256"]):
+            raise HttpError(400, "bad_package", "SHA-256 — 64 шестнадцатеричных символа "
+                            "(без контрольной суммы запускать установщик нельзя)")
+        if not WORD_FILE_RE.match(pkg["filename"]):
+            raise HttpError(400, "bad_package", "Имя файла: латиница/цифры, расширение .exe или .msi")
+    return pkg
+
+
+def load_word_package(con):
+    raw = db.get_settings(con).get("software_word")
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return None
 
 
 _REASONS = {200: "OK", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden",

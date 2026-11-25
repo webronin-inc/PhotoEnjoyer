@@ -366,3 +366,87 @@ def test_pack_path_traversal_rejected():
 def test_unknown_route_and_method(app):
     assert call(app, "GET", "/nope").status == 404
     assert call(app, "DELETE", "/api/v1/status").status == 405
+
+
+# ------------------------------------------------------------- установщик Word
+GOOD_PKG = {"enabled": True, "target": "Word 2021", "match": ["2021"],
+            "url": "https://files.example.com/office/setup.exe", "sha256": "a" * 64,
+            "size": 7_000_000, "filename": "setup.exe", "args": ["/configure", "{config}"],
+            "config_xml": "<Configuration></Configuration>", "notes": "тест"}
+
+
+def test_word_package_not_configured_for_users(app):
+    adm = admin_token(app)
+    r = register(app, make_key(app, adm))
+    got = call(app, "GET", "/api/v1/software/word", token=r.json["token"])
+    assert got.status == 404 and got.json["error"] == "not_configured"
+
+
+def test_word_package_admin_roundtrip_and_signed_manifest(app):
+    adm = admin_token(app)
+    r = register(app, make_key(app, adm))
+    assert call(app, "POST", "/api/v1/admin/software/word", GOOD_PKG, adm).status == 200
+    stored = call(app, "GET", "/api/v1/admin/software/word", token=adm).json["package"]
+    assert stored["url"] == GOOD_PKG["url"] and stored["args"] == ["/configure", "{config}"]
+    got = call(app, "GET", "/api/v1/software/word", token=r.json["token"])
+    assert got.status == 200
+    claims = security.verify_token(security.public_pem(app.priv), got.json["manifest"])
+    assert claims["kind"] == "word" and claims["pkg"]["sha256"] == "a" * 64
+    assert security.verify_token(security.public_pem(app.priv), got.json["manifest"],
+                                 now=time.time() + 4000) is None
+    head, sig = got.json["manifest"].split(".")
+    assert security.verify_token(security.public_pem(app.priv), head + "A." + sig) is None
+
+
+def test_word_package_disabled_is_hidden_from_users(app):
+    adm = admin_token(app)
+    r = register(app, make_key(app, adm))
+    call(app, "POST", "/api/v1/admin/software/word", {**GOOD_PKG, "enabled": False}, adm)
+    assert call(app, "GET", "/api/v1/software/word", token=r.json["token"]).status == 404
+
+
+@pytest.mark.parametrize("patch,why", [
+    ({"url": "http://evil.example.com/setup.exe"}, "только https"),
+    ({"url": "https://x.com/a b.exe"}, "пробелы в ссылке"),
+    ({"sha256": "zz"}, "контрольная сумма обязательна"),
+    ({"sha256": ""}, "без контрольной суммы нельзя"),
+    ({"filename": "../../evil.bat"}, "имя файла"),
+    ({"filename": "setup.ps1"}, "расширение"),
+    ({"args": ["ok", "bad\x00arg"]}, "управляющие символы"),
+    ({"match": []}, "признак версии"),
+    ({"size": -5}, "размер"),
+])
+def test_word_package_validation(app, patch, why):
+    adm = admin_token(app)
+    r = call(app, "POST", "/api/v1/admin/software/word", {**GOOD_PKG, **patch}, adm)
+    assert r.status == 400 and r.json["error"] == "bad_package", why
+
+
+def test_word_package_localhost_http_allowed_for_debug(app):
+    adm = admin_token(app)
+    r = call(app, "POST", "/api/v1/admin/software/word",
+             {**GOOD_PKG, "url": "http://127.0.0.1:8000/setup.exe"}, adm)
+    assert r.status == 200
+
+
+def test_word_package_needs_license_and_admin(app):
+    adm = admin_token(app)
+    r = register(app, make_key(app, adm))
+    assert call(app, "POST", "/api/v1/admin/software/word", GOOD_PKG, r.json["token"]).status == 403
+    assert call(app, "GET", "/api/v1/software/word").status == 401
+
+
+def test_word_events_are_whitelisted_and_opt_out_respected(app):
+    adm = admin_token(app)
+    r = register(app, make_key(app, adm))
+    ev = [{"t": "word_check", "d": {"match": True}}, {"t": "hub_open"}, {"t": "word_unknown"}]
+    assert call(app, "POST", "/api/v1/events", {"events": ev}, r.json["token"]).json["saved"] == 2
+    call(app, "POST", "/api/v1/me/settings", {"usage_stats": False}, r.json["token"])
+    assert call(app, "POST", "/api/v1/events", {"events": ev}, r.json["token"]).json["saved"] == 0
+
+
+def test_admin_settings_do_not_leak_software_config(app):
+    adm = admin_token(app)
+    call(app, "POST", "/api/v1/admin/software/word", GOOD_PKG, adm)
+    st = call(app, "GET", "/api/v1/admin/settings", token=adm).json["settings"]
+    assert "software_word" not in st and "maintenance" in st
