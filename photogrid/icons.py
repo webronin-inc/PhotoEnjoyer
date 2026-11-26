@@ -189,6 +189,11 @@ ICONS = {
     "server": [("R", 3.5, 4, 17, 6.5, 2), ("R", 3.5, 13.5, 17, 6.5, 2),
                ("D", 7, 7.2, 1), ("D", 7, 16.7, 1)],
     "ban": [("C", 12, 12, 9), ("L", [(5.7, 5.7), (18.3, 18.3)])],
+    "word": [("R", 4.5, 3, 15, 18, 2.2),
+             ("L", [(7.6, 8.2), (9.3, 15.8), (12, 9.8), (14.7, 15.8), (16.4, 8.2)])],
+    "apps": [("D", 6, 6, 1.7), ("D", 12, 6, 1.7), ("D", 18, 6, 1.7),
+             ("D", 6, 12, 1.7), ("D", 12, 12, 1.7), ("D", 18, 12, 1.7),
+             ("D", 6, 18, 1.7), ("D", 12, 18, 1.7), ("D", 18, 18, 1.7)],
 }
 KINDS = tuple(ICONS)
 
@@ -531,16 +536,17 @@ def neon_pad(size):
     return max(4, int(round(int(size) * 0.30)))
 
 
-def draw_neon(canvas, kind, cx, cy, size=24, color="#a07bff", glow=1.0):
+def draw_neon(canvas, kind, cx, cy, size=24, color="#a07bff", glow=1.0, tags=None):
     """Рисует неоновую иконку по центру (cx, cy) и держит ссылку на картинку."""
     img = tk_neon(kind, size, color, glow)
     refs = getattr(canvas, "_neon_refs", None)
     if refs is None:
         refs = canvas._neon_refs = []
     refs.append(img)
-    if len(refs) > 6:
-        del refs[:-6]
-    return canvas.create_image(cx, cy, image=img, anchor="center")
+    if len(refs) > 40:                  # на холсте с несколькими иконками ссылок нужно больше
+        del refs[:-40]
+    kw = {"tags": tags} if tags else {}
+    return canvas.create_image(cx, cy, image=img, anchor="center", **kw)
 
 
 def neon_sheet(size=44, cols=8, glow=1.0, bg="#10101a"):

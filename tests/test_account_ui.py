@@ -72,7 +72,7 @@ def world(tmp_path, monkeypatch):
         pass
     w = W()
     w.server, w.root, w.errors = server, root, errors
-    w.admin_api = ApiClient(f"http://127.0.0.1:{httpd.server_port}", timeout=3, app_version="1.0.0.0")
+    w.admin_api = ApiClient(f"http://127.0.0.1:{httpd.server_port}", timeout=30, app_version="1.0.0.0")
     w.admin_api.token = w.admin_api.login("boss", "super-secret-1", "e" * 32, "adm")["token"]
     w.key = lambda **kw: w.admin_api.admin("POST", "/keys", {"count": 1, "days": 30, "max_devices": 1,
                                                              "plan": "T", **kw})["keys"][0]

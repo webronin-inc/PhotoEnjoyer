@@ -239,7 +239,9 @@ class App:
         logo_wrap.pack(pady=(12, 8))
         logo = LogoMark(logo_wrap, p, size=40, letter="P")
         logo.pack()
-        Tooltip(logo, branding.APP_NAME, p)
+        logo.configure(cursor="hand2")
+        logo.bind("<Button-1>", lambda e: self.back_to_hub())
+        Tooltip(logo, f"{branding.APP_NAME}\nНажмите — меню приложений", p)
 
         warm = []
         self._rail_meta = {}
@@ -2080,6 +2082,22 @@ class App:
 
         self.run_task(work, done, fail)
 
+    def back_to_hub(self):
+        """Вернуться в общее меню: программа перезапускается (вход сохраняется)."""
+        from .screens import dialogs
+
+        def go():
+            if self.session is not None:
+                from .account import store
+                if not store.load():             # одноразовая сессия, чтобы не вводить пароль снова
+                    store.save(self.session.token, self.session.username, remember=False)
+            _relaunch_process()
+            self.on_close()
+
+        dialogs.confirm(self, "Вернуться в меню приложений?",
+                        "Программа перезапустится. Несохранённый коллаж будет потерян.", go,
+                        ok_text="В меню")
+
     def open_account(self):
         self._set_section("account")
 
@@ -2104,6 +2122,22 @@ class App:
         self.root.destroy()
 
 
+def _skip_hub():
+    """Меню пропускается для ярлыка «Проверить обновления», флага --photo и в тестах."""
+    return bool(os.environ.get("PE_NO_HUB")) or any(
+        a in sys.argv for a in ("--photo", "--check-updates"))
+
+
+def _relaunch_process():
+    """Запускает новый экземпляр программы (сам процесс завершается снаружи)."""
+    import subprocess
+    args = [sys.executable] + (sys.argv[1:] if getattr(sys, "frozen", False) else sys.argv)
+    try:
+        subprocess.Popen(args)
+    except Exception as e:
+        print(f"[launcher] не удалось перезапустить: {e}")
+
+
 def run():
     try:
         from tkinterdnd2 import TkinterDnD
@@ -2119,6 +2153,26 @@ def run():
         from .screens.login import LoginScreen
         session = LoginScreen(root).run()
         if session is None:                      # окно входа закрыли
+            try:
+                root.destroy()
+            except tk.TclError:
+                pass
+            return
+
+    # ---- общее меню: выбор приложения («Фото» / «Word») ----
+    if not _skip_hub():
+        from .launcher.hub import HubScreen
+        choice = HubScreen(root, session).run()
+        if choice == "logout":                   # вышли из аккаунта → заново покажем вход
+            _relaunch_process()
+            try:
+                root.destroy()
+            except tk.TclError:
+                pass
+            return
+        if choice is None:                       # окно меню закрыли
+            if session is not None:
+                session.close()
             try:
                 root.destroy()
             except tk.TclError:
