@@ -112,8 +112,9 @@ def build_admin_view(parent, app):
     tab_var = tk.StringVar(value="overview")
     tabs = SegmentedControl(root, {**p, "surface": p["bg"]},
                             [("overview", "Обзор"), ("users", "Пользователи"), ("keys", "Ключи"),
-                             ("logs", "Логи"), ("library", "Библиотека"), ("news", "Новости"),
-                             ("server", "Сервер")], variable=tab_var, padx=14, pady=6)
+                             ("logs", "Логи"), ("library", "Библиотека"), ("word", "Word"),
+                             ("news", "Новости"), ("server", "Сервер")],
+                            variable=tab_var, padx=12, pady=6)
     tabs.pack(anchor="w", padx=8, pady=(0, 10))
     holder = tk.Frame(root, bg=p["bg"])
     holder.pack(fill=tk.BOTH, expand=True, padx=8)
@@ -543,8 +544,102 @@ def build_admin_view(parent, app):
         f.refresh = refresh
         return f
 
+    # ============================================================ WORD
+    def page_word(f):
+        """Описание установщика Word 2021 для модуля «Word» (само описание подписывается
+        сервером; сам файл лежит на вашем файловом хосте по https)."""
+        box = tk.Frame(f, bg=p["surface"], highlightthickness=1, highlightbackground=p["border"])
+        box.pack(fill=tk.X, pady=(0, 8))
+        inner = tk.Frame(box, bg=p["surface"])
+        inner.pack(fill=tk.X, padx=16, pady=12)
+        enabled = tk.StringVar(value="off")
+        sv = {k: tk.StringVar() for k in ("target", "match", "url", "sha256", "size", "filename",
+                                          "args", "notes")}
+        sv["target"].set("Word 2021")
+        sv["match"].set("2021")
+        row = tk.Frame(inner, bg=p["surface"])
+        row.pack(fill=tk.X, pady=3)
+        tk.Label(row, text="Выдавать пользователям", bg=p["surface"], fg=p["text"],
+                 font=("Segoe UI", 10), width=26, anchor="w").pack(side=tk.LEFT)
+        SegmentedControl(row, p, [("off", "Выкл"), ("on", "Вкл")], variable=enabled).pack(side=tk.LEFT)
+        for key, label, w in (("target", "Название версии", 24), ("match", "Признак «подходит» (через запятую)", 24),
+                              ("url", "Ссылка на установщик (https)", 64), ("sha256", "SHA-256 файла", 64),
+                              ("size", "Размер, байт", 16), ("filename", "Имя файла (.exe / .msi)", 28),
+                              ("args", "Аргументы запуска ({config} — файл настроек)", 48),
+                              ("notes", "Примечание для пользователя", 48)):
+            r = tk.Frame(inner, bg=p["surface"])
+            r.pack(fill=tk.X, pady=3)
+            tk.Label(r, text=label, bg=p["surface"], fg=p["text"], font=("Segoe UI", 10), width=26,
+                     anchor="w").pack(side=tk.LEFT)
+            _entry(r, p, w, sv[key]).pack(side=tk.LEFT, ipady=4)
+        rx = tk.Frame(inner, bg=p["surface"])
+        rx.pack(fill=tk.X, pady=3)
+        tk.Label(rx, text="Файл настроек (config.xml)", bg=p["surface"], fg=p["text"],
+                 font=("Segoe UI", 10), width=26, anchor="nw").pack(side=tk.LEFT)
+        xml = tk.Text(rx, width=64, height=5, bg=p["surface_alt"], fg=p["text"], relief="flat", bd=0,
+                      font=("Consolas", 9), insertbackground=p["text"], padx=8, pady=6,
+                      highlightthickness=1, highlightbackground=p["border"])
+        xml.pack(side=tk.LEFT)
+        status = tk.Label(inner, text="", bg=p["surface"], fg=p["text_dim"], font=("Segoe UI", 9),
+                          anchor="w", justify="left", wraplength=760)
+        status.pack(fill=tk.X, pady=(6, 0))
+
+        def fill_from_file(path):
+            import hashlib
+            import os
+
+            def work():
+                h = hashlib.sha256()
+                with open(path, "rb") as fh:
+                    for chunk in iter(lambda: fh.read(1 << 20), b""):
+                        h.update(chunk)
+                return h.hexdigest(), os.path.getsize(path), os.path.basename(path)
+
+            def done(res):
+                sv["sha256"].set(res[0])
+                sv["size"].set(str(res[1]))
+                sv["filename"].set(res[2])
+                status.configure(text="Контрольная сумма и размер посчитаны. Не забудьте нажать «Сохранить».")
+            status.configure(text="Считаем контрольную сумму… (большой файл — до минуты)")
+            app.run_task(work, done, lambda e: status.configure(text=f"Не удалось прочитать файл: {e}"))
+
+        def pick():
+            path = filedialog.askopenfilename(parent=app.root, filetypes=[("Установщик", "*.exe *.msi"), ("Все файлы", "*.*")])
+            if path:
+                fill_from_file(path)
+
+        def save():
+            body = {"enabled": enabled.get() == "on", **{k: v.get() for k, v in sv.items()},
+                    "config_xml": xml.get("1.0", "end").strip()}
+            call("POST", "/software/word", body, toast="Описание установщика сохранено",
+                 done=lambda r: status.configure(text="Сохранено."))
+
+        bar = tk.Frame(inner, bg=p["surface"])
+        bar.pack(fill=tk.X, pady=(10, 0))
+        _btn(bar, p, "Сохранить", save, primary=True).pack(side=tk.LEFT)
+        _btn(bar, p, "Выбрать файл и посчитать SHA-256…", pick).pack(side=tk.LEFT, padx=(8, 0))
+        tk.Label(f, text="Установщик должен лежать на вашем сервере и открываться по https. Здесь хранится только его "
+                         "описание: ссылка, контрольная сумма и параметры — их подписывает сервер, поэтому программа "
+                         "запустит только тот файл, который вы указали. Лицензия Microsoft Office — на вашей стороне.",
+                 bg=p["bg"], fg=p["text_faint"], font=("Segoe UI", 9), justify="left", wraplength=900,
+                 anchor="w").pack(fill=tk.X, padx=4)
+
+        def draw(res):
+            pk = res["package"]
+            enabled.set("on" if pk.get("enabled") else "off")
+            for k in sv:
+                v = pk.get(k, "")
+                sv[k].set(", ".join(v) if isinstance(v, list) and k == "match" else
+                          " ".join(v) if isinstance(v, list) else str(v if v not in (None, 0) else ""))
+            xml.delete("1.0", "end")
+            xml.insert("1.0", pk.get("config_xml", ""))
+        f.refresh = lambda: call("GET", "/software/word", done=draw)
+        f.fill_from_file = fill_from_file
+        return f
+
     builders = {"overview": page_overview, "users": page_users, "keys": page_keys, "logs": page_logs,
-                "library": page_library, "news": page_news, "server": page_server}
+                "library": page_library, "word": page_word, "news": page_news,
+                "server": page_server}
 
     def show(*_):
         key = tab_var.get()

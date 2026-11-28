@@ -114,11 +114,13 @@ class _Steps(tk.Canvas):
 
     ROW = 34
 
-    def __init__(self, parent, p):
-        super().__init__(parent, width=380, height=len(gate.STEPS) * self.ROW + 6,
+    def __init__(self, parent, p, steps=None, width=380):
+        self.steps = tuple(steps or gate.STEPS)
+        super().__init__(parent, width=width, height=len(self.steps) * self.ROW + 6,
                          bg=p["surface"], highlightthickness=0)
         self.p = p
-        self.state = {k: ("pending", "") for k, _ in gate.STEPS}
+        self._cw = width                 # НЕ _w: это внутреннее имя виджета в Tk
+        self.state = {k: ("pending", "") for k, _ in self.steps}
         self._t0 = {}
         self._job = None
         self._font = ("Segoe UI", 10)
@@ -126,7 +128,7 @@ class _Steps(tk.Canvas):
         self._redraw()
 
     def reset(self):
-        self.state = {k: ("pending", "") for k, _ in gate.STEPS}
+        self.state = {k: ("pending", "") for k, _ in self.steps}
         self._t0 = {}
         self._redraw()
 
@@ -168,9 +170,9 @@ class _Steps(tk.Canvas):
         except tk.TclError:
             return
         p, now = self.p, time.time()
-        names = dict(gate.STEPS)
+        names = dict(self.steps)
         y = self.ROW // 2 + 2
-        for key, _ in gate.STEPS:
+        for key, _ in self.steps:
             state, detail = self.state[key]
             cx = 16
             dt = now - self._t0.get(key, 0)
@@ -194,7 +196,7 @@ class _Steps(tk.Canvas):
             label = names[key]
             self.create_text(40, y, text=label, anchor="w", fill=fg, font=self._font)
             if detail:
-                self.create_text(370, y, text=detail[:34], anchor="e",
+                self.create_text(self._cw - 10, y, text=detail[:44], anchor="e",
                                  fill=p["text_faint"] if state != "fail" else icons.NEON["red"],
                                  font=("Segoe UI", 8))
             y += self.ROW

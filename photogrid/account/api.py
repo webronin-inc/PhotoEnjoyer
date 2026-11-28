@@ -110,6 +110,10 @@ class ApiClient:
     def announcements(self):
         return self.request("GET", "/announcements")["items"]
 
+    def software_word(self):
+        """Подписанное описание установщика Word (проверяется открытым ключом)."""
+        return self.request("GET", "/software/word")
+
     def library(self):
         return self.request("GET", "/library")["items"]
 
